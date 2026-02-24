@@ -14,71 +14,6 @@ const PIE_COLORS = [
     '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
 ];
 
-/**
- * Normalize a name for comparison: lowercase + remove all spaces
- */
-const normalizeName = (name: string): string => {
-    return name.toLowerCase().replace(/\s+/g, '').trim();
-};
-
-/**
- * Calculate Levenshtein distance between two strings
- */
-const levenshteinDistance = (a: string, b: string): number => {
-    const matrix: number[][] = [];
-
-    for (let i = 0; i <= b.length; i++) {
-        matrix[i] = [i];
-    }
-    for (let j = 0; j <= a.length; j++) {
-        matrix[0][j] = j;
-    }
-
-    for (let i = 1; i <= b.length; i++) {
-        for (let j = 1; j <= a.length; j++) {
-            if (a[j - 1] === b[i - 1]) {
-                matrix[i][j] = matrix[i - 1][j - 1];
-            } else {
-                matrix[i][j] = Math.min(
-                    matrix[i - 1][j - 1] + 1,
-                    matrix[i][j - 1] + 1,
-                    matrix[i - 1][j] + 1
-                );
-            }
-        }
-    }
-
-    return matrix[b.length][a.length];
-};
-
-/**
- * Check if two names are similar enough to be grouped (1-2 char differences allowed)
- */
-const areNamesSimilar = (name1: string, name2: string, tolerance: number = 2): boolean => {
-    const norm1 = normalizeName(name1);
-    const norm2 = normalizeName(name2);
-
-    if (norm1 === norm2) return true;
-
-    const distance = levenshteinDistance(norm1, norm2);
-    const maxLength = Math.max(norm1.length, norm2.length);
-    const maxAllowedDistance = Math.min(tolerance, Math.floor(maxLength * 0.15));
-
-    return distance <= maxAllowedDistance;
-};
-
-/**
- * Find an existing group key that matches the name using fuzzy matching
- */
-const findMatchingGroupKey = (itemName: string, groups: Record<string, any>): string | null => {
-    for (const groupKey of Object.keys(groups)) {
-        if (areNamesSimilar(itemName, groupKey)) {
-            return groupKey;
-        }
-    }
-    return null;
-};
-
 export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
     const { t } = useLanguage();
 
@@ -340,22 +275,23 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
         };
     }, [data.items, data.sales]);
 
-    // 11. Sold Items Analysis (with currency conversion and fuzzy name grouping)
+    // 11. Sold Items Analysis (with currency conversion and productId grouping)
     const soldItemsAnalysis = useMemo(() => {
         // Build a map of items by ID
         const itemsMap = new Map(data.items.map(item => [item.id, item]));
 
-        // Track sales per GROUPED NAME (not per itemId) with currency-separated values
+        // Build a map of products by ID
+        const productsMap = new Map((data.products || []).map(product => [product.id, product]));
+
+        // Track sales per PRODUCT ID with currency-separated values
         const groupedStats: Record<string, {
-            groupKey: string;
-            displayName: string;
-            displayNames: string[]; // All names found in this group
-            itemIds: string[]; // All item IDs in this group
+            productId: string;
+            productName: string;
+            itemIds: string[];
             quantitySold: number;
             revenueByCurrency: CurrencyTotal;
             costByCurrency: CurrencyTotal;
             salesCount: number;
-            totalInitialStock: number;
         }> = {};
 
         // Process all sales
@@ -363,58 +299,47 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             sale.items.forEach(saleItem => {
                 const originalItem = itemsMap.get(saleItem.itemId);
 
-                // Use sale item's name (required) or fall back to inventory name
-                const itemName = saleItem.name || (originalItem?.name) || 'Unknown Item';
+                // Get productId from the original item
+                const productId = originalItem?.productId || 'unknown';
 
-                // Find existing group with fuzzy matching
-                const matchingGroupKey = findMatchingGroupKey(itemName, groupedStats);
+                // Get product name from products map, or fall back to sale item name
+                const product = productsMap.get(productId);
+                const productName = product?.name || saleItem.name || t('unknown');
 
-                if (matchingGroupKey) {
-                    // Add to existing group
-                    const group = groupedStats[matchingGroupKey];
-
-                    // Track item ID if not already in group
-                    if (!group.itemIds.includes(saleItem.itemId)) {
-                        group.itemIds.push(saleItem.itemId);
-                    }
-
-                    // Track name variant
-                    if (!group.displayNames.includes(itemName)) {
-                        group.displayNames.push(itemName);
-                    }
-
-                    // Track revenue in sale currency
-                    const saleCurrency = sale.currency;
-                    group.revenueByCurrency[saleCurrency] =
-                        (group.revenueByCurrency[saleCurrency] || 0) + saleItem.subtotal;
-
-                    // Track cost in buy currency (only if we have inventory data)
-                    if (originalItem) {
-                        const buyCurrency = originalItem.buyCurrency;
-                        const cost = (originalItem.buyPrice || 0) * saleItem.quantity;
-                        group.costByCurrency[buyCurrency] =
-                            (group.costByCurrency[buyCurrency] || 0) + cost;
-                    }
-
-                    group.quantitySold += saleItem.quantity;
-                    group.salesCount += 1;
-                } else {
-                    // Create new group
-                    const normalizedKey = normalizeName(itemName);
-                    groupedStats[normalizedKey] = {
-                        groupKey: normalizedKey,
-                        displayName: itemName,
-                        displayNames: [itemName],
-                        itemIds: [saleItem.itemId],
-                        quantitySold: saleItem.quantity,
-                        revenueByCurrency: { [sale.currency]: saleItem.subtotal },
-                        costByCurrency: originalItem
-                            ? { [originalItem.buyCurrency]: (originalItem.buyPrice || 0) * saleItem.quantity }
-                            : {},
-                        salesCount: 1,
-                        totalInitialStock: originalItem?.initialQuantity || 0
+                if (!groupedStats[productId]) {
+                    groupedStats[productId] = {
+                        productId,
+                        productName,
+                        itemIds: [],
+                        quantitySold: 0,
+                        revenueByCurrency: {},
+                        costByCurrency: {},
+                        salesCount: 0
                     };
                 }
+
+                const group = groupedStats[productId];
+
+                // Track item ID if not already in group
+                if (!group.itemIds.includes(saleItem.itemId)) {
+                    group.itemIds.push(saleItem.itemId);
+                }
+
+                // Track revenue in sale currency
+                const saleCurrency = sale.currency;
+                group.revenueByCurrency[saleCurrency] =
+                    (group.revenueByCurrency[saleCurrency] || 0) + saleItem.subtotal;
+
+                // Track cost in buy currency (only if we have inventory data)
+                if (originalItem) {
+                    const buyCurrency = originalItem.buyCurrency;
+                    const cost = (originalItem.buyPrice || 0) * saleItem.quantity;
+                    group.costByCurrency[buyCurrency] =
+                        (group.costByCurrency[buyCurrency] || 0) + cost;
+                }
+
+                group.quantitySold += saleItem.quantity;
+                group.salesCount += 1;
             });
         });
 
@@ -437,11 +362,9 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             const profitMargin = totalRevenueConverted > 0 ? (profit / totalRevenueConverted) * 100 : 0;
 
             return {
-                groupKey: stat.groupKey,
-                itemId: stat.groupKey, // Use groupKey as itemId for compatibility
-                itemName: stat.displayName,
-                displayNames: stat.displayNames,
-                variantCount: stat.displayNames.length,
+                productId: stat.productId,
+                itemId: stat.productId,
+                itemName: stat.productName,
                 quantitySold: stat.quantitySold,
                 totalRevenue: totalRevenueConverted,
                 totalCost: totalCostConverted,
@@ -462,12 +385,11 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
         // Sort by profit margin
         const topByMargin = [...analyzedItems].sort((a, b) => b.profitMargin - a.profitMargin);
 
-        // Items never sold (dead stock) - also group by fuzzy name
-        const soldGroupKeys = new Set(Object.keys(groupedStats));
+        // Items never sold (dead stock) - group by productId
+        const soldProductIds = new Set(Object.keys(groupedStats));
         const unsoldGroups: Record<string, {
-            groupKey: string;
-            displayName: string;
-            displayNames: string[];
+            productId: string;
+            productName: string;
             remainingStock: number;
             value: number;
         }> = {};
@@ -475,36 +397,32 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
         data.items
             .filter(item => item.quantity > 0)
             .forEach(item => {
-                const matchingKey = findMatchingGroupKey(item.name, unsoldGroups);
+                const productId = item.productId || 'unknown';
+
+                // Skip if already sold
+                if (soldProductIds.has(productId)) return;
+
+                const product = productsMap.get(productId);
+                const productName = product?.name || t('unknown');
                 const value = (item.sellPrice || 0) * item.quantity;
                 const valueConverted = value * getConversionRate(item.sellCurrency, profitCurrency);
 
-                if (matchingKey) {
-                    const group = unsoldGroups[matchingKey];
-                    group.remainingStock += item.quantity;
-                    group.value += valueConverted;
-                    if (!group.displayNames.includes(item.name)) {
-                        group.displayNames.push(item.name);
-                    }
+                if (unsoldGroups[productId]) {
+                    unsoldGroups[productId].remainingStock += item.quantity;
+                    unsoldGroups[productId].value += valueConverted;
                 } else {
-                    const normalizedKey = normalizeName(item.name);
-                    // Only add if not in sold items
-                    if (!soldGroupKeys.has(normalizedKey)) {
-                        unsoldGroups[normalizedKey] = {
-                            groupKey: normalizedKey,
-                            displayName: item.name,
-                            displayNames: [item.name],
-                            remainingStock: item.quantity,
-                            value: valueConverted
-                        };
-                    }
+                    unsoldGroups[productId] = {
+                        productId,
+                        productName,
+                        remainingStock: item.quantity,
+                        value: valueConverted
+                    };
                 }
             });
 
         const unsoldItems = Object.values(unsoldGroups).map(group => ({
-            itemId: group.groupKey,
-            itemName: group.displayName,
-            displayNames: group.displayNames,
+            itemId: group.productId,
+            itemName: group.productName,
             remainingStock: group.remainingStock,
             value: group.value,
             currency: profitCurrency
@@ -531,7 +449,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 unsoldCount: unsoldItems.length
             }
         };
-    }, [data.sales, data.items, profitCurrency, data.rates]);
+    }, [data.sales, data.items, data.products, profitCurrency, data.rates, t]);
 
     // 12. Pie chart data for each currency (using net positions)
     const pieChartDataByCurrency = useMemo(() => {
@@ -914,12 +832,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
                                                 {idx + 1}
                                             </span>
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-medium text-slate-700 truncate max-w-[100px]">{item.itemName}</span>
-                                                {item.variantCount > 1 && (
-                                                    <span className="text-xs text-purple-600">{item.variantCount} {t('variants')}</span>
-                                                )}
-                                            </div>
+                                            <span className="text-sm font-medium text-slate-700 truncate max-w-[100px]">{item.itemName}</span>
                                         </div>
                                         <span className="text-sm font-bold text-emerald-600">{item.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} <span className="text-slate-400 text-xs font-normal">{profitCurrency}</span></span>
                                     </div>
@@ -940,12 +853,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
                                                 {idx + 1}
                                             </span>
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-medium text-slate-700 truncate max-w-[100px]">{item.itemName}</span>
-                                                {item.variantCount > 1 && (
-                                                    <span className="text-xs text-purple-600">{item.variantCount} {t('variants')}</span>
-                                                )}
-                                            </div>
+                                            <span className="text-sm font-medium text-slate-700 truncate max-w-[100px]">{item.itemName}</span>
                                         </div>
                                         <span className="text-sm font-bold text-blue-600">{item.quantitySold} {t('units')}</span>
                                     </div>
@@ -966,12 +874,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
                                                 {idx + 1}
                                             </span>
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-medium text-slate-700 truncate max-w-[100px]">{item.itemName}</span>
-                                                {item.variantCount > 1 && (
-                                                    <span className="text-xs text-purple-600">{item.variantCount} {t('variants')}</span>
-                                                )}
-                                            </div>
+                                            <span className="text-sm font-medium text-slate-700 truncate max-w-[100px]">{item.itemName}</span>
                                         </div>
                                         <span className="text-sm font-bold text-purple-600">{item.profitMargin.toFixed(1)}%</span>
                                     </div>
@@ -1000,15 +903,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                     {soldItemsAnalysis.items.map(item => (
                                         <tr key={item.itemId} className="hover:bg-slate-50">
                                             <td className="py-3 font-medium text-slate-800">
-                                                <div className="flex flex-col">
-                                                    <span>{item.itemName}</span>
-                                                    {item.variantCount > 1 && (
-                                                        <span className="text-xs text-purple-600 flex items-center gap-1 mt-0.5">
-                                                            <span className="px-1 py-0.5 bg-purple-100 rounded">{item.variantCount} {t('variants')}</span>
-                                                            <span className="text-slate-400" title={item.displayNames?.join(', ')}>aka: {item.displayNames?.filter(n => n !== item.itemName).join(', ')}</span>
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                {item.itemName}
                                             </td>
                                             <td className="py-3 text-right text-slate-700">{item.quantitySold}</td>
                                             <td className="py-3 text-right text-slate-600">{item.avgSellPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-slate-400 text-xs">{profitCurrency}</span></td>
@@ -1042,11 +937,6 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                         <div className="flex justify-between items-start">
                                             <div>
                                                 <p className="font-medium text-slate-800">{item.itemName}</p>
-                                                {item.displayNames && item.displayNames.length > 1 && (
-                                                    <p className="text-xs text-purple-600 flex items-center gap-1">
-                                                        <span className="px-1 py-0.5 bg-purple-100 rounded">{item.displayNames.length} {t('variants')}</span>
-                                                    </p>
-                                                )}
                                                 <p className="text-xs text-slate-500">{t('remaining')}: {item.remainingStock} {t('units')}</p>
                                             </div>
                                             <div className="text-right">

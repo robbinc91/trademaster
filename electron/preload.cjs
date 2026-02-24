@@ -46,5 +46,6 @@ contextBridge.exposeInMainWorld('electron', {
   },
   Buffer: {
     from: (data, encoding) => Buffer.from(data, encoding)
-  }
+  },
+  exportPdf: (htmlContent, defaultFilename) => ipcRenderer.invoke('export-pdf', htmlContent, defaultFilename)
 });

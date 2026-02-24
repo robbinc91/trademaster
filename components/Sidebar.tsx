@@ -2,7 +2,8 @@ import React from 'react';
 import { 
   LayoutDashboard, Users, Package, ShoppingCart, 
   BrainCircuit, History, RefreshCw, Trash2, 
-  FolderOpen, Save, FilePlus, ChartBar, ChartBarStacked 
+  FolderOpen, Save, FilePlus, ChartBar, ChartBarStacked, Tags,
+  FileText
 } from 'lucide-react';
 import { TabType, TABS } from '../constants';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -28,10 +29,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: TABS.STATISTICS, label: t('statistics'), icon: ChartBar },
     { id: TABS.BALANCE, label: t('tab_balance'), icon: ChartBarStacked },
     { id: TABS.PARTICIPANTS, label: t('participants'), icon: Users },
+    { id: TABS.PRODUCTS, label: t('products'), icon: Tags },
     { id: TABS.INVENTORY, label: t('inventory'), icon: Package },
     { id: TABS.SALES, label: t('sales'), icon: ShoppingCart },
     { id: TABS.SALES_HISTORY, label: t('sales_history'), icon: History },
     { id: TABS.EXCHANGE, label: t('exchange_rates'), icon: RefreshCw },
+    { id: TABS.REPORTS, label: t('reports'), icon: FileText },
     { id: TABS.AI_INSIGHTS, label: t('ai_analyst'), icon: BrainCircuit },
   ];
 

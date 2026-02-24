@@ -1,223 +1,132 @@
 import React, { useState, useMemo } from 'react';
-import { Item, SaleItem } from '../types';
-import { CURRENCIES } from '../constants';
-import { ShoppingCart, Trash, Plus, CheckCircle, Phone, Calendar, AlertCircle } from 'lucide-react';
+import { Item, SaleItem, Product } from '../types';
+import { ShoppingCart, Plus, Trash2, Package, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { CURRENCIES } from '../constants';
 
 interface SalesProps {
     items: Item[];
+    products: Product[];
     addSale: (sale: Omit<import('../types').Sale, 'id'>) => void;
 }
 
-/**
- * Normalize a name for comparison: lowercase + remove all spaces
- */
-const normalizeName = (name: string): string => {
-    return name.toLowerCase().replace(/\s+/g, '').trim();
-};
-
-/**
- * Calculate Levenshtein distance between two strings
- */
-const levenshteinDistance = (a: string, b: string): number => {
-    const matrix: number[][] = [];
-
-    for (let i = 0; i <= b.length; i++) {
-        matrix[i] = [i];
-    }
-    for (let j = 0; j <= a.length; j++) {
-        matrix[0][j] = j;
-    }
-
-    for (let i = 1; i <= b.length; i++) {
-        for (let j = 1; j <= a.length; j++) {
-            if (a[j - 1] === b[i - 1]) {
-                matrix[i][j] = matrix[i - 1][j - 1];
-            } else {
-                matrix[i][j] = Math.min(
-                    matrix[i - 1][j - 1] + 1,
-                    matrix[i][j - 1] + 1,
-                    matrix[i - 1][j] + 1
-                );
-            }
-        }
-    }
-
-    return matrix[b.length][a.length];
-};
-
-/**
- * Check if two names are similar enough to be grouped (1-2 char differences allowed)
- */
-const areNamesSimilar = (name1: string, name2: string, tolerance: number = 2): boolean => {
-    const norm1 = normalizeName(name1);
-    const norm2 = normalizeName(name2);
-
-    if (norm1 === norm2) return true;
-
-    const distance = levenshteinDistance(norm1, norm2);
-    const maxLength = Math.max(norm1.length, norm2.length);
-    const maxAllowedDistance = Math.min(tolerance, Math.floor(maxLength * 0.15));
-
-    return distance <= maxAllowedDistance;
-};
-
 interface GroupedItem {
-    name: string;
-    displayNames: string[];
+    productId: string;
+    productName: string;
     totalQuantity: number;
     batches: Item[];
     minPrice: number;
     maxPrice: number;
     currencies: string[];
+    avgPrice: number;
 }
 
-export const Sales: React.FC<SalesProps> = ({ items, addSale }) => {
+export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
     const { t } = useLanguage();
+
+    // Cart state
     const [cart, setCart] = useState<SaleItem[]>([]);
-    const [selectedGroupName, setSelectedGroupName] = useState<string>('');
-
-    // Item Input State
-    const [qtyInput, setQtyInput] = useState<string>('1');
-    const [priceInput, setPriceInput] = useState<string>('');
-    const [currencyInput, setCurrencyInput] = useState<string>('CUP');
-
-    // Checkout Details State
-    const [transportCost, setTransportCost] = useState<string>('0');
-    const [transportCurrency, setTransportCurrency] = useState<string>('USD');
+    const [saleCurrency, setSaleCurrency] = useState<string>('USD');
     const [address, setAddress] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [transportCost, setTransportCost] = useState(0);
+    const [transportCurrency, setTransportCurrency] = useState<string>('USD');
     const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0]);
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+    const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
+    const [customPrice, setCustomPrice] = useState<string>('');
+    const [qtyInput, setQtyInput] = useState<string>('');
 
-    // The currency of the current active sale (locked by first item)
-    const [saleCurrency, setSaleCurrency] = useState<string>('CUP');
-
-    // Group items by name with fuzzy matching
+    // Group items by productId (exact match)
     const groupedItems = useMemo(() => {
         const groups: Record<string, GroupedItem> = {};
 
         items.forEach(item => {
             if (item.quantity <= 0) return;
 
-            // Find existing group with fuzzy matching
-            let matchingKey: string | null = null;
-            for (const key of Object.keys(groups)) {
-                if (areNamesSimilar(item.name, key)) {
-                    matchingKey = key;
-                    break;
-                }
-            }
+            const productId = item.productId || 'unknown';
+            const product = products.find(p => p.id === productId);
+            const productName = product?.name || t('unknown');
 
-            if (matchingKey) {
-                const group = groups[matchingKey];
-                group.totalQuantity += item.quantity;
-                group.batches.push(item);
-                if (!group.displayNames.includes(item.name)) {
-                    group.displayNames.push(item.name);
-                }
-                if (item.sellPrice < group.minPrice) group.minPrice = item.sellPrice;
-                if (item.sellPrice > group.maxPrice) group.maxPrice = item.sellPrice;
-                if (!group.currencies.includes(item.sellCurrency)) {
-                    group.currencies.push(item.sellCurrency);
-                }
-            } else {
-                const normalizedKey = normalizeName(item.name);
-                groups[normalizedKey] = {
-                    name: item.name,
-                    displayNames: [item.name],
-                    totalQuantity: item.quantity,
-                    batches: [item],
+            if (!groups[productId]) {
+                groups[productId] = {
+                    productId,
+                    productName,
+                    totalQuantity: 0,
+                    batches: [],
                     minPrice: item.sellPrice,
                     maxPrice: item.sellPrice,
-                    currencies: [item.sellCurrency]
+                    currencies: [item.sellCurrency],
+                    avgPrice: 0
                 };
+            }
+
+            const group = groups[productId];
+            group.totalQuantity += item.quantity;
+            group.batches.push(item);
+
+            if (item.sellPrice < group.minPrice) {
+                group.minPrice = item.sellPrice;
+            }
+            if (item.sellPrice > group.maxPrice) {
+                group.maxPrice = item.sellPrice;
+            }
+
+            if (!group.currencies.includes(item.sellCurrency)) {
+                group.currencies.push(item.sellCurrency);
             }
         });
 
-        return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
-    }, [items]);
+        // Calculate average price
+        Object.values(groups).forEach(group => {
+            const totalValue = group.batches.reduce((sum, batch) => sum + (batch.sellPrice * batch.quantity), 0);
+            group.avgPrice = group.totalQuantity > 0 ? totalValue / group.totalQuantity : 0;
+        });
 
-    const selectedGroup = useMemo(() => {
-        return groupedItems.find(g =>
-            areNamesSimilar(g.name, selectedGroupName) ||
-            g.displayNames.some(dn => areNamesSimilar(dn, selectedGroupName))
-        );
-    }, [selectedGroupName, groupedItems]);
+        return Object.values(groups).sort((a, b) => a.productName.localeCompare(b.productName));
+    }, [items, products, t]);
 
-    // Handle Item Selection - Pre-fill defaults
-    const handleItemSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const name = e.target.value;
-        setSelectedGroupName(name);
-
-        const group = groupedItems.find(g =>
-            areNamesSimilar(g.name, name) ||
-            g.displayNames.some(dn => areNamesSimilar(dn, name))
-        );
-
-        if (group) {
-            // Use average price or first available price
-            const avgPrice = group.batches.reduce((sum, b) => sum + b.sellPrice, 0) / group.batches.length;
-            setPriceInput(avgPrice.toString());
-            setCurrencyInput(group.currencies[0] || 'CUP');
+    const toggleGroup = (productId: string) => {
+        const newExpanded = new Set(expandedGroups);
+        if (newExpanded.has(productId)) {
+            newExpanded.delete(productId);
         } else {
-            setPriceInput('');
+            newExpanded.add(productId);
         }
+        setExpandedGroups(newExpanded);
     };
 
-    const addToCart = () => {
-        if (!selectedGroup) return;
+    const addToCart = (productId: string, quantity: number, pricePerUnit: number, currency: string) => {
+        const group = groupedItems.find(g => g.productId === productId);
+        if (!group) return;
 
-        const qty = parseFloat(qtyInput);
-        const price = parseFloat(priceInput);
+        let remainingQty = quantity;
+        const itemsToAdd: SaleItem[] = [];
 
-        // Validation: Quantity
-        if (qty <= 0) return;
-        if (qty > selectedGroup.totalQuantity) {
-            alert(t('error_stock', { qty: selectedGroup.totalQuantity }));
-            return;
-        }
-
-        // Validation: Price
-        if (!price || price <= 0) {
-            alert("Price must be greater than 0.");
-            return;
-        }
-
-        // Validation: Currency Consistency
-        if (cart.length > 0 && currencyInput !== saleCurrency) {
-            alert(`Currency mismatch! Current order is in ${saleCurrency}. You cannot add items in ${currencyInput} to this order.`);
-            return;
-        }
-
-        // Initialize Sale Currency if cart is empty
-        if (cart.length === 0) {
-            setSaleCurrency(currencyInput);
-        }
-
-        // FIFO: Sort batches by date (oldest first)
-        const sortedBatches = [...selectedGroup.batches]
+        const sortedBatches = [...group.batches]
             .filter(b => b.quantity > 0)
             .sort((a, b) => new Date(a.dateAdded || a.purchaseDate).getTime() - new Date(b.dateAdded || b.purchaseDate).getTime());
 
-        let remainingQty = qty;
-        const itemsToAdd: SaleItem[] = [];
-
         for (const batch of sortedBatches) {
             if (remainingQty <= 0) break;
+
             const qtyFromBatch = Math.min(remainingQty, batch.quantity);
+
             itemsToAdd.push({
                 itemId: batch.id,
-                name: batch.name,
                 quantity: qtyFromBatch,
-                pricePerUnit: price,
-                subtotal: qtyFromBatch * price
+                pricePerUnit: pricePerUnit,
+                subtotal: qtyFromBatch * pricePerUnit
             });
+
             remainingQty -= qtyFromBatch;
         }
 
-        // Add to cart
+        if (itemsToAdd.length === 0) return;
+
         setCart(prevCart => {
             const newCart = [...prevCart];
+
             itemsToAdd.forEach(newItem => {
                 const existingIndex = newCart.findIndex(c => c.itemId === newItem.itemId && c.pricePerUnit === newItem.pricePerUnit);
                 if (existingIndex >= 0) {
@@ -230,276 +139,327 @@ export const Sales: React.FC<SalesProps> = ({ items, addSale }) => {
                     newCart.push(newItem);
                 }
             });
+
             return newCart;
         });
 
-        // Reset Inputs
-        setSelectedGroupName('');
-        setQtyInput('1');
-        setPriceInput('');
+        setQtyInput('');
+        setCustomPrice('');
+        setSelectedBatch(null);
     };
 
     const removeFromCart = (itemId: string) => {
-        setCart(cart.filter(i => i.itemId !== itemId));
+        setCart(prevCart => prevCart.filter(item => item.itemId !== itemId));
     };
 
-    const cartTotal = useMemo(() => cart.reduce((acc, item) => acc + item.subtotal, 0), [cart]);
+    const cartTotal = useMemo(() => {
+        return cart.reduce((sum, item) => sum + item.subtotal, 0);
+    }, [cart]);
 
-    const handleCheckout = () => {
+    const handleCompleteSale = () => {
         if (cart.length === 0) return;
-        if (!address) {
-            alert(t('error_address'));
-            return;
-        }
 
         addSale({
+            dateSold: saleDate,
             items: cart,
-            transportCost: parseFloat(transportCost) || 0,
-            transportCurrency: transportCurrency,
-            address,
-            customerPhone,
             totalAmount: cartTotal,
             currency: saleCurrency,
-            dateSold: saleDate
+            address,
+            customerPhone,
+            transportCost,
+            transportCurrency
         });
 
-        // Reset Form
         setCart([]);
         setAddress('');
         setCustomerPhone('');
-        setTransportCost('0');
-        alert(t('sale_success'));
+        setTransportCost(0);
+        setSaleDate(new Date().toISOString().split('T')[0]);
     };
 
+    const totalItemsInCart = cart.reduce((sum, item) => sum + item.quantity, 0);
+
     return (
-        <div className="p-8 h-full flex flex-col lg:flex-row gap-8">
-            {/* Left Column: POS Interface */}
-            <div className="flex-1 space-y-6">
-                <h2 className="text-3xl font-bold text-slate-800">{t('sales_title')}</h2>
-
-                {/* Item Selection Panel */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 animate-fade-in-up">
-                    <h3 className="text-lg font-semibold mb-4 text-slate-700">{t('add_items_order')}</h3>
-
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                        {/* 1. Item Selector */}
-                        <div className="md:col-span-5">
-                            <label className="block text-xs font-medium text-slate-500 mb-1">{t('select_item_label')}</label>
-                            <select
-                                value={selectedGroupName}
-                                onChange={handleItemSelect}
-                                className="w-full border rounded-lg p-2.5 bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                            >
-                                <option value="">{t('choose_item_placeholder')}</option>
-                                {groupedItems.map(group => (
-                                    <option key={group.name} value={group.name}>
-                                        {group.name} | Stock: {group.totalQuantity} | {group.minPrice !== group.maxPrice
-                                            ? `${group.minPrice}-${group.maxPrice}`
-                                            : group.minPrice} {group.currencies.join('/')}
-                                        {group.displayNames.length > 1 && ` (${group.displayNames.length} ${t('variants')})`}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* 2. Quantity */}
-                        <div className="md:col-span-2">
-                            <label className="block text-xs font-medium text-slate-500 mb-1">{t('qty_label')}</label>
-                            <input
-                                type="number"
-                                min="0.1"
-                                step="any"
-                                value={qtyInput}
-                                onChange={e => setQtyInput(e.target.value)}
-                                className="w-full border rounded-lg p-2.5 text-center focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                        </div>
-
-                        {/* 3. Price Override */}
-                        <div className="md:col-span-2">
-                            <label className="block text-xs font-medium text-slate-500 mb-1">{t('unit_price')}</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={priceInput}
-                                disabled={!selectedGroupName}
-                                onChange={e => setPriceInput(e.target.value)}
-                                className="w-full border rounded-lg p-2.5 text-center bg-white disabled:bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                        </div>
-
-                        {/* 4. Currency Override */}
-                        <div className="md:col-span-2">
-                            <label className="block text-xs font-medium text-slate-500 mb-1">{t('currency_label')}</label>
-                            <select
-                                value={currencyInput}
-                                disabled={!selectedGroupName}
-                                onChange={e => setCurrencyInput(e.target.value)}
-                                className="w-full border rounded-lg p-2.5 bg-white disabled:bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                            >
-                                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div>
-
-                        {/* 5. Add Button */}
-                        <div className="md:col-span-1">
-                            <button
-                                onClick={addToCart}
-                                disabled={!selectedGroupName}
-                                className="w-full bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center shadow-lg shadow-blue-200"
-                            >
-                                <Plus size={24} />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Contextual Help */}
-                    {selectedGroupName && selectedGroup && (
-                        <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-                            <AlertCircle size={14} />
-                            <span>
-                                {selectedGroup.batches.length > 1
-                                    ? `${selectedGroup.batches.length} ${t('batches')} available. `
-                                    : ''}
-                                Price and currency can be modified for this sale only.
-                            </span>
-                        </div>
-                    )}
-                </div>
-
-                {/* Cart View */}
-                <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden flex-1 flex flex-col min-h-[300px]">
-                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                        <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-                            <ShoppingCart size={18} /> {t('current_order')}
-                        </h3>
-                        <span className="text-sm text-slate-500">{t('items_count', { count: cart.length })}</span>
-                    </div>
-                    <div className="p-4 flex-1 overflow-y-auto">
-                        {cart.length === 0 ? (
-                            <div className="h-full flex flex-col items-center justify-center text-slate-300">
-                                <ShoppingCart size={48} className="mb-2" />
-                                <p>{t('cart_empty')}</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {cart.map(item => (
-                                    <div key={item.itemId} className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 transition-colors">
-                                        <div>
-                                            <div className="font-medium text-slate-900">{item.name}</div>
-                                            <div className="text-xs text-slate-500 flex items-center gap-1">
-                                                <span className="bg-slate-200 px-1.5 py-0.5 rounded text-slate-700">{item.quantity}</span>
-                                                <span>x</span>
-                                                <span className="font-medium">{item.pricePerUnit}</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-4">
-                                            <span className="font-bold text-slate-700">{item.subtotal.toFixed(2)}</span>
-                                            <button onClick={() => removeFromCart(item.itemId)} className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded">
-                                                <Trash size={16} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                    <div className="p-4 border-t border-slate-100 bg-slate-50">
-                        <div className="flex justify-between items-center text-lg font-bold text-slate-800">
-                            <span>{t('total')}</span>
-                            <span>{cartTotal.toFixed(2)} {saleCurrency}</span>
-                        </div>
-                    </div>
+        <div className="p-8 max-w-6xl mx-auto space-y-6 animate-fade-in">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-3xl font-bold text-slate-800">{t('sales_title')}</h2>
+                    <p className="text-slate-500 mt-1">{t('add_items_order')}</p>
                 </div>
             </div>
 
-            {/* Right Column: Checkout Form */}
-            <div className="w-full lg:w-96 flex flex-col gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Product Selection */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div className="p-4 bg-slate-50 border-b border-slate-200">
+                        <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                            <Package size={18} />
+                            {t('select_item_label')}
+                        </h3>
+                    </div>
 
-                <div className="bg-white p-6 rounded-xl shadow-lg border border-blue-100">
-                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                        <CheckCircle size={20} className="text-emerald-500" /> {t('checkout')}
-                    </h3>
+                    <div className="max-h-[500px] overflow-y-auto">
+                        {groupedItems.length > 0 ? (
+                            <div className="divide-y divide-slate-100">
+                                {groupedItems.map(group => (
+                                    <div key={group.productId} className="group">
+                                        {/* Group Header */}
+                                        <div
+                                            className="p-4 hover:bg-slate-50 cursor-pointer flex items-center justify-between"
+                                            onClick={() => toggleGroup(group.productId)}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                                    <Layers size={18} />
+                                                </div>
+                                                <div>
+                                                    <p className="font-medium text-slate-800">{group.productName}</p>
+                                                    <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                                                        <span>{group.totalQuantity} {t('units')}</span>
+                                                        {group.batches.length > 1 && (
+                                                            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
+                                                                {group.batches.length} {t('batches')}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="text-right">
+                                                    <p className="font-semibold text-slate-800">
+                                                        {group.minPrice !== group.maxPrice
+                                                            ? `${group.minPrice.toLocaleString()} - ${group.maxPrice.toLocaleString()}`
+                                                            : group.minPrice.toLocaleString()}
+                                                    </p>
+                                                    <p className="text-xs text-slate-500">{group.currencies.join(', ')}</p>
+                                                </div>
+                                                {expandedGroups.has(group.productId) ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                                            </div>
+                                        </div>
 
-                    <div className="space-y-4">
-                        {/* Date */}
-                        <div>
-                            <label className="block text-xs font-medium text-slate-500 mb-1">{t('date_sale')}</label>
-                            <div className="relative">
-                                <Calendar size={16} className="absolute left-3 top-3 text-slate-400" />
+                                        {/* Expanded Batches */}
+                                        {expandedGroups.has(group.productId) && (
+                                            <div className="bg-slate-50 p-3 space-y-2">
+                                                {group.batches.map(batch => (
+                                                    <div
+                                                        key={batch.id}
+                                                        className="bg-white p-3 rounded-lg border border-slate-200 flex items-center justify-between"
+                                                    >
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-slate-700">{batch.quantity} {t('units')}</span>
+                                                                <span className="text-xs text-slate-400">•</span>
+                                                                <span className="text-sm text-slate-600">@ {batch.sellPrice.toLocaleString()} {batch.sellCurrency}</span>
+                                                            </div>
+                                                            <div className="text-xs text-slate-400 mt-1">
+                                                                {batch.dateAdded || batch.purchaseDate}
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedBatch(batch.id);
+                                                                setCustomPrice(batch.sellPrice.toString());
+                                                                setQtyInput('1');
+                                                            }}
+                                                            className="p-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors"
+                                                        >
+                                                            <Plus size={16} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+
+                                                {/* Quick Add Section */}
+                                                {selectedBatch && group.batches.some(b => b.id === selectedBatch) && (
+                                                    <div className="bg-white p-3 rounded-lg border border-blue-200 mt-3">
+                                                        <p className="text-sm font-medium text-slate-700 mb-2">{t('add_to_cart')}</p>
+                                                        <div className="flex gap-2">
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                max={group.totalQuantity}
+                                                                value={qtyInput}
+                                                                onChange={(e) => setQtyInput(e.target.value)}
+                                                                className="w-20 border rounded-lg px-2 py-1 text-sm"
+                                                                placeholder={t('qty_label')}
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.01"
+                                                                value={customPrice}
+                                                                onChange={(e) => setCustomPrice(e.target.value)}
+                                                                className="flex-1 border rounded-lg px-2 py-1 text-sm"
+                                                                placeholder={t('unit_price')}
+                                                            />
+                                                            <select
+                                                                value={saleCurrency}
+                                                                onChange={(e) => setSaleCurrency(e.target.value)}
+                                                                className="border rounded-lg px-2 py-1 text-sm bg-white"
+                                                            >
+                                                                {CURRENCIES.map(c => (
+                                                                    <option key={c} value={c}>{c}</option>
+                                                                ))}
+                                                            </select>
+                                                            <button
+                                                                onClick={() => {
+                                                                    const qty = parseInt(qtyInput) || 0;
+                                                                    const price = parseFloat(customPrice) || 0;
+                                                                    if (qty > 0 && price > 0) {
+                                                                        addToCart(group.productId, qty, price, saleCurrency);
+                                                                    }
+                                                                }}
+                                                                className="px-3 py-1 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
+                                                            >
+                                                                {t('add_btn')}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-slate-400">
+                                <Package size={48} className="mx-auto mb-4 opacity-30" />
+                                <p>{t('inventory_empty')}</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Cart & Checkout */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                            <ShoppingCart size={18} />
+                            {t('current_order')}
+                        </h3>
+                        <span className="text-sm text-slate-500">
+                            {totalItemsInCart} {t('items_count').replace('{count}', totalItemsInCart.toString())}
+                        </span>
+                    </div>
+
+                    <div className="p-4 space-y-3 max-h-[250px] overflow-y-auto">
+                        {cart.length > 0 ? (
+                            cart.map(cartItem => {
+                                // Find item and product name
+                                const item = items.find(i => i.id === cartItem.itemId);
+                                const product = item ? products.find(p => p.id === item.productId) : null;
+                                const productName = product?.name || t('unknown');
+                                return (
+                                    <div key={cartItem.itemId} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                                        <div>
+                                            <p className="font-medium text-slate-800">{productName}</p>
+                                            <p className="text-sm text-slate-500">
+                                                {cartItem.quantity} × {cartItem.pricePerUnit.toLocaleString()} = {cartItem.subtotal.toLocaleString()} {saleCurrency}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => removeFromCart(cartItem.itemId)}
+                                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                );
+                            })
+                        ) : (
+                            <p className="text-center text-slate-400 py-8">{t('cart_empty')}</p>
+                        )}
+                    </div>
+
+                    {/* Sale Details */}
+                    <div className="p-4 border-t border-slate-200 space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">{t('date_sale')}</label>
                                 <input
                                     type="date"
                                     value={saleDate}
-                                    onChange={e => setSaleDate(e.target.value)}
-                                    className="w-full pl-10 border rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
+                                    onChange={(e) => setSaleDate(e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm"
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">{t('currency_label')}</label>
+                                <select
+                                    value={saleCurrency}
+                                    onChange={(e) => setSaleCurrency(e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                                >
+                                    {CURRENCIES.map(c => (
+                                        <option key={c} value={c}>{c}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
 
-                        {/* Phone */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">{t('customer_phone')}</label>
-                            <div className="relative">
-                                <Phone size={16} className="absolute left-3 top-3 text-slate-400" />
-                                <input
-                                    type="tel"
-                                    value={customerPhone}
-                                    onChange={e => setCustomerPhone(e.target.value)}
-                                    className="w-full pl-10 border rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
-                                    placeholder="+53 5xxx xxxx"
-                                />
-                            </div>
+                            <input
+                                type="text"
+                                value={customerPhone}
+                                onChange={(e) => setCustomerPhone(e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm"
+                                placeholder="+53 5xxx xxxx"
+                            />
                         </div>
 
-                        {/* Address */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">{t('delivery_address')}</label>
-                            <textarea
+                            <input
+                                type="text"
                                 value={address}
-                                onChange={e => setAddress(e.target.value)}
-                                className="w-full border rounded-lg p-2.5 h-16 text-sm resize-none outline-none focus:border-blue-500"
+                                onChange={(e) => setAddress(e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm"
                                 placeholder={t('address_placeholder')}
-                            ></textarea>
+                            />
                         </div>
 
-                        {/* Transport */}
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1">{t('transport_fee')}</label>
                                 <input
                                     type="number"
+                                    min="0"
                                     value={transportCost}
-                                    onChange={e => setTransportCost(e.target.value)}
-                                    className="w-full border rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
+                                    onChange={(e) => setTransportCost(parseFloat(e.target.value) || 0)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm"
                                 />
                             </div>
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1">{t('currency_label')}</label>
                                 <select
                                     value={transportCurrency}
-                                    onChange={e => setTransportCurrency(e.target.value)}
-                                    className="w-full border rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
+                                    onChange={(e) => setTransportCurrency(e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
                                 >
-                                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                    {CURRENCIES.map(c => (
+                                        <option key={c} value={c}>{c}</option>
+                                    ))}
                                 </select>
                             </div>
                         </div>
+                    </div>
 
-                        <div className="pt-4 border-t border-slate-100 mt-2">
-                            <div className="flex justify-between items-center mb-4">
-                                <span className="text-slate-600 font-medium">{t('total')}</span>
-                                <span className="text-xl font-bold text-slate-900">{cartTotal.toFixed(2)} {saleCurrency}</span>
-                            </div>
-                            <button
-                                onClick={handleCheckout}
-                                disabled={cart.length === 0}
-                                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-200 flex justify-center items-center gap-2"
-                            >
-                                <CheckCircle size={20} />
-                                {t('complete_sale')}
-                            </button>
+                    {/* Total & Checkout */}
+                    <div className="p-4 bg-slate-50 border-t border-slate-200">
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-lg font-semibold text-slate-700">{t('total')}</span>
+                            <span className="text-2xl font-bold text-slate-900">
+                                {cartTotal.toLocaleString()} {saleCurrency}
+                            </span>
                         </div>
+
+                        <button
+                            onClick={handleCompleteSale}
+                            disabled={cart.length === 0}
+                            className="w-full py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {t('complete_sale')}
+                        </button>
                     </div>
                 </div>
             </div>

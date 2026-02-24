@@ -1,19 +1,22 @@
-import React, { useState } from 'react';
-import { Item, Participant } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Item, Participant, Product } from '../types';
 import { CURRENCIES } from '../constants';
-import { Plus, Package, Calendar, Pencil, X, Trash2 } from 'lucide-react';
+import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface InventoryProps {
   items: Item[];
   participants: Participant[];
+  products: Product[];
+  addProduct: (name: string) => string;
   addItem: (item: Omit<Item, 'id'>) => void;
   editItem: (id: string, item: Omit<Item, 'id'>) => void;
   deleteItem: (id: string) => void;
 }
 
 const emptyFormData = {
-  name: '',
+  productId: '',
+  newProductName: '',
   unit: 'pcs',
   buyPrice: '',
   buyCurrency: 'USD',
@@ -26,29 +29,68 @@ const emptyFormData = {
   dateAdded: new Date().toISOString().split('T')[0]
 };
 
-export const Inventory: React.FC<InventoryProps> = ({ items, participants, addItem, editItem, deleteItem }) => {
+export const Inventory: React.FC<InventoryProps> = ({ items, participants, products, addProduct, addItem, editItem, deleteItem }) => {
   const { t } = useLanguage();
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   // Form State
   const [formData, setFormData] = useState(emptyFormData);
+  const [showNewProductInput, setShowNewProductInput] = useState(false);
+
+  // Group items by productId
+  const groupedItems = useMemo(() => {
+    const groups: Record<string, { product: Product | null; items: Item[] }> = {};
+
+    items.forEach(item => {
+      const productId = item.productId || 'unknown';
+      if (!groups[productId]) {
+        groups[productId] = {
+          product: products.find(p => p.id === productId) || null,
+          items: []
+        };
+      }
+      groups[productId].items.push(item);
+    });
+
+    return Object.entries(groups).map(([productId, data]) => ({
+      productId,
+      productName: data.product?.name || t('unknown'),
+      product: data.product,
+      items: data.items,
+      totalQuantity: data.items.reduce((sum, item) => sum + item.quantity, 0)
+    })).sort((a, b) => a.productName.localeCompare(b.productName));
+  }, [items, products, t]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+
+    // Handle product selection
+    if (name === 'productId') {
+      if (value === '__new__') {
+        setShowNewProductInput(true);
+        setFormData(prev => ({ ...prev, productId: '', newProductName: '' }));
+      } else {
+        setShowNewProductInput(false);
+        setFormData(prev => ({ ...prev, productId: value }));
+      }
+    }
   };
 
   const resetForm = () => {
     setFormData(emptyFormData);
     setEditingItem(null);
     setShowForm(false);
+    setShowNewProductInput(false);
   };
 
   const handleEdit = (item: Item) => {
     setEditingItem(item);
     setFormData({
-      name: item.name,
+      productId: item.productId || '',
+      newProductName: '',
       unit: item.unit,
       buyPrice: item.buyPrice.toString(),
       buyCurrency: item.buyCurrency,
@@ -64,7 +106,9 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, addIt
   };
 
   const handleDelete = (item: Item) => {
-    if (confirm(`${t('confirm_delete_item')}\n\n${item.name}`)) {
+    const product = products.find(p => p.id === item.productId);
+    const itemName = product?.name || t('unknown');
+    if (confirm(`${t('confirm_delete_item')}\n\n${itemName}`)) {
       deleteItem(item.id);
     }
   };
@@ -76,8 +120,27 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, addIt
       return;
     }
 
+    let productId = formData.productId;
+
+    // If creating a new product
+    if (showNewProductInput && formData.newProductName.trim()) {
+      // Check if product with same name already exists (case insensitive)
+      const existingProduct = products.find(p => p.name.toLowerCase() === formData.newProductName.trim().toLowerCase());
+      if (existingProduct) {
+        productId = existingProduct.id;
+      } else {
+        // Create new product and get the ID
+        productId = addProduct(formData.newProductName.trim());
+      }
+    }
+
+    if (!productId) {
+      alert(t('select_product'));
+      return;
+    }
+
     const itemData = {
-      name: formData.name,
+      productId: productId,
       unit: formData.unit,
       buyPrice: parseFloat(formData.buyPrice),
       buyCurrency: formData.buyCurrency,
@@ -89,6 +152,7 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, addIt
       transportCost: parseFloat(formData.transportCost) || 0,
       transportCurrency: formData.transportCurrency,
       dateAdded: formData.dateAdded,
+      purchaseDate: formData.dateAdded,
     };
 
     if (editingItem) {
@@ -98,6 +162,16 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, addIt
     }
 
     resetForm();
+  };
+
+  const toggleGroup = (productId: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(productId)) {
+      newExpanded.delete(productId);
+    } else {
+      newExpanded.add(productId);
+    }
+    setExpandedGroups(newExpanded);
   };
 
   return (
@@ -129,11 +203,49 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, addIt
           </h3>
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
 
-            {/* Row 1: Basic Info */}
+            {/* Row 1: Product Selection */}
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t('item_name')}</label>
-              <input required name="name" value={formData.name} onChange={handleInputChange} className="w-full border rounded-md p-2" placeholder="e.g. iPhone 15" />
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('select_product')}</label>
+              <select
+                required
+                name="productId"
+                value={formData.productId}
+                onChange={handleInputChange}
+                className="w-full border rounded-md p-2 bg-slate-50"
+                disabled={showNewProductInput}
+              >
+                <option value="">{t('choose_product_placeholder')}</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="__new__">+ {t('create_product')}</option>
+              </select>
             </div>
+
+            {showNewProductInput && (
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1">{t('new_product')}</label>
+                <div className="flex gap-2">
+                  <input
+                    required
+                    name="newProductName"
+                    value={formData.newProductName}
+                    onChange={handleInputChange}
+                    className="flex-1 border rounded-md p-2"
+                    placeholder={t('product_name_placeholder')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewProductInput(false);
+                      setFormData(prev => ({ ...prev, productId: '' }));
+                    }}
+                    className="px-3 py-2 text-slate-500 hover:text-slate-700"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">{t('measurement_unit')}</label>
               <input required name="unit" value={formData.unit} onChange={handleInputChange} className="w-full border rounded-md p-2" placeholder="pcs" />
@@ -224,82 +336,94 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, addIt
         </div>
       )}
 
-      {/* List */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">{t('table_item')}</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">{t('table_stock')}</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">{t('table_prices')}</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">{t('table_invested')}</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">{t('date_added')}</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">{t('actions')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.length > 0 ? items.map(item => {
-                const buyerName = participants.find(p => p.id === item.buyerId)?.name || t('unknown');
-                return (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <div className="h-10 w-10 flex-shrink-0 bg-blue-50 rounded-lg flex items-center justify-center text-blue-500 mr-4">
-                          <Package size={20} />
+      {/* Grouped List */}
+      <div className="space-y-4">
+        {groupedItems.length > 0 ? (
+          groupedItems.map(group => (
+            <div key={group.productId} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+              {/* Group Header */}
+              <div
+                className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                onClick={() => toggleGroup(group.productId)}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                    <Layers size={18} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">{group.productName}</p>
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <span>{group.totalQuantity} {t('units')}</span>
+                      <span className="px-1.5 py-0.5 bg-slate-100 rounded text-xs">
+                        {group.items.length} {group.items.length === 1 ? 'batch' : t('batches')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="text-sm text-slate-500">{t('table_stock')}</p>
+                    <p className="font-semibold text-slate-800">{group.totalQuantity}</p>
+                  </div>
+                  {expandedGroups.has(group.productId) ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </div>
+
+              {/* Expanded Items */}
+              {expandedGroups.has(group.productId) && (
+                <div className="border-t border-slate-100 divide-y divide-slate-50">
+                  {group.items.map(item => {
+                    const buyerName = participants.find(p => p.id === item.buyerId)?.name || t('unknown');
+                    return (
+                      <div key={item.id} className="p-4 hover:bg-slate-50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="p-2 bg-slate-100 text-slate-500 rounded-lg">
+                              <Package size={16} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-slate-700">{item.quantity} {item.unit}</span>
+                                <span className="text-xs text-slate-400">•</span>
+                                <span className="text-sm text-slate-600">{item.dateAdded}</span>
+                              </div>
+                              <div className="text-sm flex gap-3 mt-1">
+                                <span className="text-red-600">B: {item.buyPrice} {item.buyCurrency}</span>
+                                <span className="text-emerald-600">S: {item.sellPrice} {item.sellCurrency}</span>
+                              </div>
+                              <div className="text-xs text-slate-500 mt-1">{buyerName}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleEdit(item); }}
+                              className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title={t('edit')}
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
+                              className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title={t('delete')}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-medium text-slate-900">{item.name}</div>
-                          <div className="text-xs text-slate-500">{item.id.slice(0, 8)}</div>
-                        </div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-slate-900">{item.quantity} {item.unit}</div>
-                      {item.initialQuantity !== item.quantity && (
-                        <div className="text-xs text-slate-400">Initial: {item.initialQuantity}</div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm flex flex-col gap-1">
-                        <span className="text-red-600 font-medium">B: {item.buyPrice} {item.buyCurrency}</span>
-                        <span className="text-emerald-600 font-medium">S: {item.sellPrice} {item.sellCurrency}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {buyerName}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {item.dateAdded}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleEdit(item)}
-                          className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title={t('edit')}
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item)}
-                          className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title={t('delete')}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              }) : (
-                <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">{t('inventory_empty')}</td>
-                </tr>
+                    );
+                  })}
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          ))
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-12 text-center text-slate-400">
+            <Package size={48} className="mx-auto mb-4 opacity-30" />
+            <p>{t('inventory_empty')}</p>
+          </div>
+        )}
       </div>
     </div>
   );

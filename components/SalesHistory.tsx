@@ -1,19 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { Sale, SaleItem, Item } from '../types';
-import { Calendar, Phone, Search, MapPin, Pencil, X, Trash2, ChevronDown, ChevronUp, Receipt, DollarSign, Truck, Filter, Package, RotateCcw } from 'lucide-react';
+import { Sale, SaleItem, Item, Product } from '../types';
+import { Calendar, Phone, Search, MapPin, Pencil, X, Trash2, ChevronDown, ChevronUp, Receipt, DollarSign, Truck, Filter, Package, RotateCcw, Plus, Minus } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CURRENCIES } from '../constants';
 
 interface SalesHistoryProps {
     sales: Sale[];
     items: Item[];
+    products: Product[];
     editSale: (id: string, sale: Omit<Sale, 'id'>) => void;
     deleteSale: (id: string) => void;
 }
 
 type DateFilter = 'all' | 'today' | 'week' | 'month';
 
-export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSale, deleteSale }) => {
+export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, products, editSale, deleteSale }) => {
     const { t } = useLanguage();
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState<DateFilter>('all');
@@ -30,6 +31,19 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
         currency: 'CUP',
         dateSold: ''
     });
+
+    // Edit items state - for modifying quantities
+    const [editItems, setEditItems] = useState<SaleItem[]>([]);
+
+    // Helper to get product name from item
+    const getProductName = (itemId: string): string => {
+        const item = items.find(i => i.id === itemId);
+        if (item) {
+            const product = products.find(p => p.id === item.productId);
+            return product?.name || t('unknown');
+        }
+        return t('unknown');
+    };
 
     // Date filter logic
     const getDateRange = (filter: DateFilter): { start: Date; end: Date } | null => {
@@ -119,6 +133,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
 
     const handleEditClick = (sale: Sale) => {
         setEditingSale(sale);
+        setEditItems([...sale.items]); // Copy items for editing
         setEditForm({
             customerPhone: sale.customerPhone || '',
             address: sale.address || '',
@@ -127,6 +142,62 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
             totalAmount: sale.totalAmount.toString(),
             currency: sale.currency,
             dateSold: sale.dateSold
+        });
+    };
+
+    // Calculate total from edit items
+    const calculateItemsTotal = (itemsList: SaleItem[]): number => {
+        return itemsList.reduce((sum, item) => sum + item.subtotal, 0);
+    };
+
+    // Update item quantity and recalculate subtotal
+    const updateItemQuantity = (index: number, newQuantity: number) => {
+        if (newQuantity < 1) return;
+
+        setEditItems(prev => {
+            const updated = [...prev];
+            updated[index] = {
+                ...updated[index],
+                quantity: newQuantity,
+                subtotal: newQuantity * updated[index].pricePerUnit
+            };
+
+            // Update the total in editForm
+            const newTotal = calculateItemsTotal(updated);
+            setEditForm(form => ({ ...form, totalAmount: newTotal.toString() }));
+
+            return updated;
+        });
+    };
+
+    // Update item price per unit and recalculate subtotal
+    const updateItemPrice = (index: number, newPrice: number) => {
+        if (newPrice < 0) return;
+
+        setEditItems(prev => {
+            const updated = [...prev];
+            updated[index] = {
+                ...updated[index],
+                pricePerUnit: newPrice,
+                subtotal: updated[index].quantity * newPrice
+            };
+
+            // Update the total in editForm
+            const newTotal = calculateItemsTotal(updated);
+            setEditForm(form => ({ ...form, totalAmount: newTotal.toString() }));
+
+            return updated;
+        });
+    };
+
+    // Remove item from edit
+    const removeEditItem = (index: number) => {
+        setEditItems(prev => {
+            const updated = prev.filter((_, i) => i !== index);
+            // Update the total in editForm
+            const newTotal = calculateItemsTotal(updated);
+            setEditForm(form => ({ ...form, totalAmount: newTotal.toString() }));
+            return updated;
         });
     };
 
@@ -139,8 +210,14 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
         e.preventDefault();
         if (!editingSale) return;
 
+        // Validate items
+        if (editItems.length === 0) {
+            alert(t('no_items_error') || 'Cannot save a sale with no items');
+            return;
+        }
+
         editSale(editingSale.id, {
-            items: editingSale.items,
+            items: editItems,
             customerPhone: editForm.customerPhone,
             address: editForm.address,
             transportCost: parseFloat(editForm.transportCost) || 0,
@@ -154,7 +231,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
     };
 
     const handleRollback = (sale: Sale) => {
-        const itemsList = sale.items.map(i => `${i.quantity}x ${i.name}`).join('\n  • ');
+        const itemsList = sale.items.map(i => `${i.quantity}x ${getProductName(i.itemId)}`).join('\n  • ');
         const totalRestored = sale.items.reduce((sum, i) => sum + i.quantity, 0);
 
         if (confirm(
@@ -328,7 +405,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
                                                     {t('items_count').replace('{count}', '')}
                                                     {sale.items.length > 0 && (
                                                         <span className="text-slate-400">
-                                                            ({sale.items.slice(0, 2).map(i => i.name).join(', ')}{sale.items.length > 2 ? '...' : ''})
+                                                            ({sale.items.slice(0, 2).map(i => getProductName(i.itemId)).join(', ')}{sale.items.length > 2 ? '...' : ''})
                                                         </span>
                                                     )}
                                                 </div>
@@ -367,7 +444,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
                                                                     <div className="p-1.5 bg-blue-50 text-blue-600 rounded text-xs font-medium">
                                                                         {item.quantity}x
                                                                     </div>
-                                                                    <span className="font-medium text-slate-800">{item.name}</span>
+                                                                    <span className="font-medium text-slate-800">{getProductName(item.itemId)}</span>
                                                                 </div>
                                                                 <div className="text-right">
                                                                     <p className="font-semibold text-slate-700">{item.subtotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
@@ -426,17 +503,97 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, editSa
                         </div>
 
                         <form onSubmit={handleEditSubmit} className="p-4 grid grid-cols-2 gap-3">
-                            {/* Sale Items (Read-only) */}
+                            {/* Sale Items (Editable) */}
                             <div className="bg-slate-50 p-3 rounded-lg col-span-2">
-                                <label className="block text-sm font-semibold text-slate-700 mb-1">{t('items_in_sale')}</label>
-                                <div className="space-y-1 max-h-28 overflow-y-auto pr-2">
-                                    {editingSale.items.map((item, idx) => (
-                                        <div key={idx} className="flex justify-between text-sm">
-                                            <span className="text-slate-700">{item.quantity}x {item.name}</span>
-                                            <span className="text-slate-500">{item.subtotal.toFixed(2)}</span>
-                                        </div>
-                                    ))}
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="block text-sm font-semibold text-slate-700">{t('items_in_sale')}</label>
+                                    <span className="text-xs text-slate-500">
+                                        {editItems.length} {editItems.length === 1 ? t('item_label') : t('items_count').replace('{count}', '')}
+                                    </span>
                                 </div>
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                                    {editItems.length > 0 ? editItems.map((item, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
+                                            {/* Product Name */}
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-sm font-medium text-slate-800 truncate block">
+                                                    {getProductName(item.itemId)}
+                                                </span>
+                                            </div>
+
+                                            {/* Quantity Controls */}
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateItemQuantity(idx, item.quantity - 1)}
+                                                    disabled={item.quantity <= 1}
+                                                    className="p-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                >
+                                                    <Minus size={14} />
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    value={item.quantity}
+                                                    onChange={(e) => updateItemQuantity(idx, parseInt(e.target.value) || 1)}
+                                                    className="w-14 text-center border rounded px-1 py-1 text-sm font-medium"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateItemQuantity(idx, item.quantity + 1)}
+                                                    className="p-1 rounded bg-slate-100 hover:bg-slate-200 transition-colors"
+                                                >
+                                                    <Plus size={14} />
+                                                </button>
+                                            </div>
+
+                                            {/* Price Per Unit */}
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-xs text-slate-400">@</span>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={item.pricePerUnit}
+                                                    onChange={(e) => updateItemPrice(idx, parseFloat(e.target.value) || 0)}
+                                                    className="w-20 border rounded px-2 py-1 text-sm text-right"
+                                                />
+                                            </div>
+
+                                            {/* Subtotal */}
+                                            <div className="w-20 text-right">
+                                                <span className="text-sm font-semibold text-slate-700">
+                                                    {item.subtotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+
+                                            {/* Delete Button */}
+                                            <button
+                                                type="button"
+                                                onClick={() => removeEditItem(idx)}
+                                                className="p-1.5 rounded bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                                                title={t('remove_item') || 'Remove item'}
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    )) : (
+                                        <div className="text-center py-4 text-slate-400">
+                                            <Package size={32} className="mx-auto mb-2 opacity-30" />
+                                            <p className="text-sm">{t('no_items_error') || 'No items in sale'}</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Items Total */}
+                                {editItems.length > 0 && (
+                                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-200">
+                                        <span className="text-sm font-medium text-slate-600">{t('items_subtotal') || 'Items Subtotal'}</span>
+                                        <span className="font-bold text-slate-800">
+                                            {calculateItemsTotal(editItems).toLocaleString(undefined, { maximumFractionDigits: 2 })} {editForm.currency}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Customer Phone */}

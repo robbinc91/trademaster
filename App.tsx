@@ -5,21 +5,24 @@ import { Dashboard } from './components/Dashboard';
 import { Statistics } from './components/Statistics';
 import { Balance } from './components/Balance';
 import { Participants } from './components/Participants';
+import { Products } from './components/Products';
 import { Inventory } from './components/Inventory';
 import { Sales } from './components/Sales';
 import { SalesHistory } from './components/SalesHistory';
 import { ExchangeRates } from './components/ExchangeRates';
 import { AIAnalyst } from './components/AIAnalyst';
 import { TabType, TABS } from './constants';
-import { StoreData, Participant, Item, Sale, ConversionRates, Adjustment } from './types';
+import { StoreData, Participant, Product, Item, Sale, ConversionRates, Adjustment } from './types';
 import { LanguageProvider, Language } from './contexts/LanguageContext';
 import { jsonStorage } from './src/utils/jsonStorage';
 import { translations } from './translations';
+import { Reports } from './components/Reports';
 
 const electron = (window as any).electron;
 
 const INITIAL_DATA: StoreData = {
   participants: [],
+  products: [],
   items: [],
   sales: [],
   rates: { USD: 320, EUR: 335 },
@@ -84,9 +87,68 @@ const AppContent: React.FC = () => {
       }
 
       if (loadedData) {
+        // Migration: Ensure products array exists
+        let migratedProducts = loadedData.products || [];
+        let migratedItems = loadedData.items || [];
+
+        // Migration: For items without productId, create products from their names
+        if (migratedItems.length > 0) {
+          const existingProductNames = new Map<string, string>();
+          migratedProducts.forEach(p => {
+            existingProductNames.set(p.name.toLowerCase(), p.id);
+          });
+
+          const newProducts: Product[] = [];
+          const itemsToUpdate: { index: number, productId: string }[] = [];
+
+          migratedItems.forEach((item, index) => {
+            if (!item.productId) {
+              // Legacy items may have a 'name' field - use it for migration
+              const legacyItem = item as any;
+              const itemName = legacyItem.name || 'Unknown';
+              const itemLowerName = itemName.toLowerCase();
+              let productId = existingProductNames.get(itemLowerName);
+
+              if (!productId) {
+                // Create new product
+                const newProduct: Product = {
+                  id: crypto.randomUUID(),
+                  name: itemName,
+                  createdAt: item.dateAdded || new Date().toISOString()
+                };
+                newProducts.push(newProduct);
+                existingProductNames.set(itemLowerName, newProduct.id);
+                productId = newProduct.id;
+              }
+
+              itemsToUpdate.push({ index, productId });
+            }
+          });
+
+          // Add new products
+          if (newProducts.length > 0) {
+            migratedProducts = [...migratedProducts, ...newProducts];
+          }
+
+          // Update items with productId
+          if (itemsToUpdate.length > 0) {
+            migratedItems = migratedItems.map((item, index) => {
+              const update = itemsToUpdate.find(u => u.index === index);
+              if (update) {
+                // Remove name field if present (now using productId reference)
+                const { name, ...rest } = item as any;
+                return { ...rest, productId: update.productId };
+              }
+              return item;
+            });
+          }
+        }
+
         setStoreData({
           ...INITIAL_DATA,
           ...loadedData,
+          products: migratedProducts,
+          items: migratedItems,
           rates: loadedData.rates || INITIAL_DATA.rates,
           adjustments: loadedData.adjustments || [],
           language: (loadedData.language === 'es' || loadedData.language === 'en') ? loadedData.language : 'en'
@@ -201,6 +263,39 @@ const AppContent: React.FC = () => {
     setStoreData(prev => ({ ...prev, participants: prev.participants.filter(p => p.id !== id) }));
   };
 
+  // --- Product Management ---
+
+  const addProduct = (name: string): string => {
+    const id = crypto.randomUUID();
+    setStoreData(prev => ({
+      ...prev,
+      products: [...prev.products, {
+        id,
+        name,
+        createdAt: new Date().toISOString()
+      }]
+    }));
+    return id;
+  };
+
+  const editProduct = (id: string, name: string) => {
+    setStoreData(prev => ({
+      ...prev,
+      products: prev.products.map(p => p.id === id ? { ...p, name } : p)
+    }));
+  };
+
+  const deleteProduct = (id: string) => {
+    // Check if product is used in inventory
+    if (storeData.items.some(i => i.productId === id)) {
+      alert(getAlertMsg('alert_delete_product_error'));
+      return;
+    }
+    setStoreData(prev => ({ ...prev, products: prev.products.filter(p => p.id !== id) }));
+  };
+
+  // --- Item Management ---
+
   const addItem = (item: Omit<Item, 'id'>) => {
     setStoreData(prev => ({ ...prev, items: [...prev.items, { ...item, id: crypto.randomUUID() }] }));
   };
@@ -305,10 +400,12 @@ const AppContent: React.FC = () => {
       case TABS.STATISTICS: return <Statistics data={storeData} />;
       case TABS.BALANCE: return <Balance data={storeData} addAdjustment={addAdjustment} />;
       case TABS.PARTICIPANTS: return <Participants participants={storeData.participants} addParticipant={addParticipant} removeParticipant={removeParticipant} />;
-      case TABS.INVENTORY: return <Inventory items={storeData.items} participants={storeData.participants} addItem={addItem} editItem={editItem} deleteItem={deleteItem} />;
-      case TABS.SALES: return <Sales items={storeData.items} addSale={addSale} />;
-      case TABS.SALES_HISTORY: return <SalesHistory sales={storeData.sales || []} items={storeData.items} editSale={editSale} deleteSale={deleteSale} />;
+      case TABS.PRODUCTS: return <Products products={storeData.products || []} addProduct={addProduct} editProduct={editProduct} deleteProduct={deleteProduct} />;
+      case TABS.INVENTORY: return <Inventory items={storeData.items} participants={storeData.participants} products={storeData.products || []} addProduct={addProduct} addItem={addItem} editItem={editItem} deleteItem={deleteItem} />;
+      case TABS.SALES: return <Sales items={storeData.items} products={storeData.products || []} addSale={addSale} />;
+      case TABS.SALES_HISTORY: return <SalesHistory sales={storeData.sales || []} products={storeData.products || []} items={storeData.items} editSale={editSale} deleteSale={deleteSale} />;
       case TABS.EXCHANGE: return <ExchangeRates rates={storeData.rates} onUpdate={updateRates} />;
+      case TABS.REPORTS: return <Reports data={storeData} />;
       case TABS.AI_INSIGHTS: return <AIAnalyst data={storeData} />;
       default: return <Dashboard data={storeData} />;
     }

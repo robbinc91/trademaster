@@ -6,25 +6,27 @@ export const translations = {
     statistics: 'Statistics',
     balance: 'Balance',
     participants: 'Participants',
+    products: 'Products',
     inventory: 'Inventory',
     sales: 'Point of Sale',
     sales_history: 'Sales History',
     exchange_rates: 'Exchange Rates',
     ai_analyst: 'AI Analyst',
-
+    reports: 'PDF Reports',
+    
     // File Operations
     open_file: 'Open',
     save_file: 'Save',
     new_file: 'New',
     wipe_workspace: 'Wipe Workspace',
     unsaved_workspace: 'Unsaved Workspace',
-
+    
     // Dashboard
     total_revenue: 'Total Revenue',
     total_sales: 'Total Sales',
     active_items: 'Active Items',
     low_stock: 'Low Stock Alerts',
-
+    
     // Inventory
     inventory_purchases: 'Inventory & Purchases',
     register_stock: 'Register new stock and purchases',
@@ -57,6 +59,25 @@ export const translations = {
     delete: 'Delete',
     confirm_delete_item: 'Are you sure you want to delete this item?',
 
+    // Products
+    products_title: 'Products Catalog',
+    products_subtitle: 'Manage product names for inventory grouping',
+    add_product: 'Add Product',
+    new_product: 'New Product',
+    product_name: 'Product Name',
+    product_name_placeholder: 'e.g. iPhone 15 Pro Max',
+    search_products: 'Search products...',
+    no_products: 'No products defined. Add products to organize your inventory.',
+    no_products_found: 'No products found matching your search.',
+    confirm_delete_product: 'Are you sure you want to delete this product?',
+    alert_delete_product_error: 'Cannot delete product with associated inventory items.',
+    total_products: 'Total Products',
+    created: 'Created',
+    select_product: 'Select Product',
+    choose_product_placeholder: 'Choose a product...',
+    or_create_new: 'or create new',
+    create_product: 'Create Product',
+
     // Sales POS
     sales_title: 'Point of Sale',
     add_items_order: 'Add Items to Order',
@@ -85,7 +106,7 @@ export const translations = {
     unit_price: 'Unit Price',
     batches: 'batches',
     add_to_cart: 'Add to Cart',
-
+    
     // Sales History
     history_title: 'Sales History',
     history_subtitle: 'Review past transactions and details.',
@@ -110,6 +131,7 @@ export const translations = {
     yesterday: 'Yesterday',
     this_week: 'This Week',
     this_month: 'This Month',
+    sales_text: 'sales',
     with_transport: 'w/ transport',
     try_different_filter: 'Try a different filter or search term',
     // Rollback
@@ -120,13 +142,17 @@ export const translations = {
     total_units_restore: 'Total units to restore',
     sale_amount: 'Sale amount',
     rollback_warning: 'This action cannot be undone.',
-
+    // Edit Sale Items
+    remove_item: 'Remove item',
+    no_items_error: 'Sale must have at least one item',
+    items_subtotal: 'Items Subtotal',
+    
     // Exchange Rates
     rates_title: 'Exchange Rates',
     rates_subtitle: 'Manage conversion rates against Cuban Peso (CUP).',
     update_rates: 'Update Rates',
     rates_updated: 'Rates Updated',
-
+    
     // Participants
     participants_title: 'Participants',
     participants_subtitle: 'Manage partners and buyers.',
@@ -134,7 +160,7 @@ export const translations = {
     participant_name_placeholder: 'e.g. Alice Corp',
     joined_date: 'Joined {date}',
     delete_confirm: 'Are you sure?',
-
+    
     // Alerts & Dialogs
     alert_save_success: 'File saved successfully.',
     alert_save_error: 'Error saving file.',
@@ -142,7 +168,7 @@ export const translations = {
     alert_delete_error: 'Cannot delete participant with associated inventory items.',
     confirm_reset_title: '⚠️ WARNING',
     confirm_reset_body: 'This will clear your CURRENT WORKSPACE.\nIt does not delete the file on disk until you click "Save".\n\nAre you sure?',
-
+    
     // General
     unknown: 'Unknown',
     switch_lang: 'Español',
@@ -261,11 +287,31 @@ export const translations = {
     profit: 'Profit',
     margin: 'Margin',
     units: 'units',
+    item_label: 'Item',
     // Fuzzy grouping
     variants: 'variants',
-    also_known: 'aka'
+    also_known: 'aka',
+    // Reports
+    tab_reports: 'Reports',
+    reports_title: 'PDF Reports',
+    reports_subtitle: 'Generate professional reports for your business',
+    report_sales_summary: 'Sales Summary',
+    report_sales_summary_desc: 'Overview of sales performance with revenue breakdown',
+    report_inventory: 'Inventory Status',
+    report_inventory_desc: 'Current stock levels and inventory valuation',
+    report_profit_loss: 'Profit & Loss',
+    report_profit_loss_desc: 'Financial analysis with profit margins by product',
+    report_sales_history: 'Sales History',
+    report_sales_history_desc: 'Detailed transaction history with item breakdown',
+    report_error: 'Error generating report',
+    generating: 'Generating...',
+    download_pdf: 'Download PDF',
+    reports_info_title: 'About PDF Reports',
+    reports_info_1: 'Reports are generated from your current data',
+    reports_info_2: 'PDF files can be shared or printed for records',
+    reports_info_3: 'Reports include summaries, tables, and analysis'
   },
-
+  
   es: {
     // Navigation
     dashboard: 'Panel Principal',
@@ -273,12 +319,14 @@ export const translations = {
     statistics: 'Estadísticas',
     balance: 'Balance',
     participants: 'Participantes',
+    products: 'Productos',
     inventory: 'Inventario',
     sales: 'Punto de Venta',
     sales_history: 'Historial de Ventas',
     exchange_rates: 'Tasas de Cambio',
     ai_analyst: 'Analista IA',
-
+    reports: 'Reportes PDF',
+    
     // File Operations
     open_file: 'Abrir',
     save_file: 'Guardar',
@@ -324,6 +372,25 @@ export const translations = {
     delete: 'Eliminar',
     confirm_delete_item: '¿Está seguro de que desea eliminar este artículo?',
 
+    // Products
+    products_title: 'Catálogo de Productos',
+    products_subtitle: 'Administrar nombres de productos para agrupación de inventario',
+    add_product: 'Añadir Producto',
+    new_product: 'Nuevo Producto',
+    product_name: 'Nombre del Producto',
+    product_name_placeholder: 'ej. iPhone 15 Pro Max',
+    search_products: 'Buscar productos...',
+    no_products: 'No hay productos definidos. Añada productos para organizar su inventario.',
+    no_products_found: 'No se encontraron productos que coincidan con su búsqueda.',
+    confirm_delete_product: '¿Está seguro de que desea eliminar este producto?',
+    alert_delete_product_error: 'No se puede eliminar un producto con artículos asociados en el inventario.',
+    total_products: 'Total Productos',
+    created: 'Creado',
+    select_product: 'Seleccionar Producto',
+    choose_product_placeholder: 'Elija un producto...',
+    or_create_new: 'o crear nuevo',
+    create_product: 'Crear Producto',
+
     // Sales POS
     sales_title: 'Punto de Venta',
     add_items_order: 'Agregar Artículos',
@@ -352,7 +419,7 @@ export const translations = {
     unit_price: 'Precio Unit.',
     batches: 'lotes',
     add_to_cart: 'Agregar al Carrito',
-
+    
     // Sales History
     history_title: 'Historial de Ventas',
     history_subtitle: 'Revise transacciones pasadas.',
@@ -377,6 +444,7 @@ export const translations = {
     yesterday: 'Ayer',
     this_week: 'Esta Semana',
     this_month: 'Este Mes',
+    sales_text: 'ventas',
     with_transport: 'c/ transporte',
     try_different_filter: 'Intente un filtro o término diferente',
     // Rollback
@@ -387,6 +455,10 @@ export const translations = {
     total_units_restore: 'Total de unidades a restaurar',
     sale_amount: 'Monto de la venta',
     rollback_warning: 'Esta acción no se puede deshacer.',
+    // Edit Sale Items
+    remove_item: 'Eliminar artículo',
+    no_items_error: 'La venta debe tener al menos un artículo',
+    items_subtotal: 'Subtotal de Artículos',
 
     // Exchange Rates
     rates_title: 'Tasas de Cambio',
@@ -528,8 +600,29 @@ export const translations = {
     profit: 'Ganancia',
     margin: 'Margen',
     units: 'unidades',
+    item_label: 'Artículo',
     // Fuzzy grouping
     variants: 'variantes',
-    also_known: 'también'
+    also_known: 'también',
+    // Reports
+    tab_reports: 'Reportes',
+    reports_title: 'Reportes PDF',
+    reports_subtitle: 'Genere reportes profesionales para su negocio',
+    report_sales_summary: 'Resumen de Ventas',
+    report_sales_summary_desc: 'Vista general del rendimiento de ventas con desglose de ingresos',
+    report_inventory: 'Estado de Inventario',
+    report_inventory_desc: 'Niveles actuales de stock y valoración de inventario',
+    report_profit_loss: 'Ganancias y Pérdidas',
+    report_profit_loss_desc: 'Análisis financiero con márgenes de ganancia por producto',
+    report_sales_history: 'Historial de Ventas',
+    report_sales_history_desc: 'Historial detallado de transacciones con desglose de artículos',
+    report_error: 'Error al generar el reporte',
+    generating: 'Generando...',
+    download_pdf: 'Descargar PDF',
+    reports_info_title: 'Acerca de los Reportes PDF',
+    reports_info_1: 'Los reportes se generan a partir de sus datos actuales',
+    reports_info_2: 'Los archivos PDF pueden compartirse o imprimirse para registros',
+    reports_info_3: 'Los reportes incluyen resúmenes, tablas y análisis',
+    reports_info_4: 'Los reportes se generan completamente en su navegador - ningún dato se envía a ningún servidor'
   }
 };

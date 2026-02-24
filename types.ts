@@ -4,26 +4,31 @@ export interface Participant {
   joinedAt: string;
 }
 
+export interface Product {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface Item {
   id: string,
-  name: string;
+  productId: string;  // Reference to Product.id
   unit: string;
   buyPrice: number;
-  buyCurrency: string; // This is the Buy Currency
+  buyCurrency: string;
   sellPrice: number;
-  sellCurrency: string; // New: Explicit Sell Currency
-  quantity: number; 
+  sellCurrency: string;
+  quantity: number;
   initialQuantity: number;
   buyerId: string;
   transportCost: number;
   transportCurrency: string;
-  dateAdded: string; // System timestamp
+  dateAdded: string;
   purchaseDate: string;
 }
 
 export interface SaleItem {
   itemId: string;
-  name: string;
   quantity: number;
   pricePerUnit: number;
   subtotal: number;
@@ -32,23 +37,24 @@ export interface SaleItem {
 export interface Sale {
   id: string;
   items: SaleItem[];
+  products: Product[];
   transportCost: number;
   transportCurrency: string;
   address: string;
-  customerPhone: string; // NEW: Customer phone number
+  customerPhone: string;
   totalAmount: number;
   currency: string;
   dateSold: string;
 }
 
 export interface ConversionRates {
-  USD: number; // Rate relative to CUP (e.g. 1 USD = x CUP)
-  EUR: number; // Rate relative to CUP (e.g. 1 EUR = y CUP)
+  USD: number;
+  EUR: number;
 }
 
 export type CurrencyTotal = Record<string, number>;
 
-
+// Adjustment types for partner balance
 export interface Adjustment {
   id: string;
   date: string;
@@ -61,6 +67,7 @@ export interface Adjustment {
 
 export interface StoreData {
   participants: Participant[];
+  products: Product[];  // New: Product catalog
   items: Item[];
   sales: Sale[];
   rates: ConversionRates;

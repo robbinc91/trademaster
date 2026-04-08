@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Item, Participant, Product } from '../types';
 import { CURRENCIES } from '../constants';
-import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers } from 'lucide-react';
+import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers, ArrowDownAZ } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface InventoryProps {
@@ -29,17 +29,26 @@ const emptyFormData = {
   dateAdded: new Date().toISOString().split('T')[0]
 };
 
+type InventorySortMode = 'productName' | 'buyDate';
+
+function purchaseTimestamp(item: Item): number {
+  const raw = item.purchaseDate || item.dateAdded || '';
+  const t = new Date(raw).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 export const Inventory: React.FC<InventoryProps> = ({ items, participants, products, addProduct, addItem, editItem, deleteItem }) => {
   const { t } = useLanguage();
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [sortMode, setSortMode] = useState<InventorySortMode>('productName');
 
   // Form State
   const [formData, setFormData] = useState(emptyFormData);
   const [showNewProductInput, setShowNewProductInput] = useState(false);
 
-  // Group items by productId
+  // Group items by productId (sorted by product name; batches inside each group by purchase date, newest first)
   const groupedItems = useMemo(() => {
     const groups: Record<string, { product: Product | null; items: Item[] }> = {};
 
@@ -54,13 +63,34 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
       groups[productId].items.push(item);
     });
 
-    return Object.entries(groups).map(([productId, data]) => ({
-      productId,
-      productName: data.product?.name || t('unknown'),
-      product: data.product,
-      items: data.items,
-      totalQuantity: data.items.reduce((sum, item) => sum + item.quantity, 0)
-    })).sort((a, b) => a.productName.localeCompare(b.productName));
+    return Object.entries(groups).map(([productId, data]) => {
+      const sortedBatches = [...data.items].sort((a, b) => {
+        const dt = purchaseTimestamp(b) - purchaseTimestamp(a);
+        if (dt !== 0) return dt;
+        return a.id.localeCompare(b.id);
+      });
+      return {
+        productId,
+        productName: data.product?.name || t('unknown'),
+        product: data.product,
+        items: sortedBatches,
+        totalQuantity: sortedBatches.reduce((sum, item) => sum + item.quantity, 0)
+      };
+    }).sort((a, b) => a.productName.localeCompare(b.productName));
+  }, [items, products, t]);
+
+  // Flat list: one row per purchase batch, sorted by buying date (newest first); same product can appear multiple times
+  const itemsByPurchaseDate = useMemo(() => {
+    return [...items]
+      .map(item => ({
+        item,
+        productName: products.find(p => p.id === item.productId)?.name || t('unknown')
+      }))
+      .sort((a, b) => {
+        const dt = purchaseTimestamp(b.item) - purchaseTimestamp(a.item);
+        if (dt !== 0) return dt;
+        return a.productName.localeCompare(b.productName);
+      });
   }, [items, products, t]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -194,6 +224,22 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
           {showForm ? <X size={18} /> : <Plus size={18} />}
           {showForm ? t('cancel') : t('new_purchase')}
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <ArrowDownAZ size={18} className="text-slate-400 shrink-0" aria-hidden />
+        <label htmlFor="inventory-sort-mode" className="text-sm font-medium text-slate-600">
+          {t('inventory_sort_by')}
+        </label>
+        <select
+          id="inventory-sort-mode"
+          value={sortMode}
+          onChange={e => setSortMode(e.target.value as InventorySortMode)}
+          className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white text-slate-800 min-w-[220px]"
+        >
+          <option value="productName">{t('inventory_sort_product_name')}</option>
+          <option value="buyDate">{t('inventory_sort_buy_date')}</option>
+        </select>
       </div>
 
       {showForm && (
@@ -336,12 +382,11 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
         </div>
       )}
 
-      {/* Grouped List */}
+      {/* Grouped list (by product name) or flat list (by purchase date) */}
       <div className="space-y-4">
-        {groupedItems.length > 0 ? (
+        {sortMode === 'productName' && groupedItems.length > 0 && (
           groupedItems.map(group => (
             <div key={group.productId} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-              {/* Group Header */}
               <div
                 className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
                 onClick={() => toggleGroup(group.productId)}
@@ -369,7 +414,6 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                 </div>
               </div>
 
-              {/* Expanded Items */}
               {expandedGroups.has(group.productId) && (
                 <div className="border-t border-slate-100 divide-y divide-slate-50">
                   {group.items.map(item => {
@@ -396,6 +440,7 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                           </div>
                           <div className="flex items-center gap-1">
                             <button
+                              type="button"
                               onClick={(e) => { e.stopPropagation(); handleEdit(item); }}
                               className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                               title={t('edit')}
@@ -403,6 +448,7 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                               <Pencil size={16} />
                             </button>
                             <button
+                              type="button"
                               onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
                               className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                               title={t('delete')}
@@ -418,7 +464,62 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
               )}
             </div>
           ))
-        ) : (
+        )}
+
+        {sortMode === 'buyDate' && itemsByPurchaseDate.length > 0 && (
+          itemsByPurchaseDate.map(({ item, productName }) => {
+            const buyerName = participants.find(p => p.id === item.buyerId)?.name || t('unknown');
+            const displayDate = item.purchaseDate || item.dateAdded;
+            return (
+              <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 hover:bg-slate-50/80">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+                      <Package size={18} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-800 truncate">{productName}</p>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-slate-600 mt-0.5">
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <Calendar size={14} className="shrink-0" />
+                          {displayDate}
+                        </span>
+                        <span className="text-slate-300">·</span>
+                        <span className="font-medium text-slate-700">{item.quantity} {item.unit}</span>
+                      </div>
+                      <div className="text-sm flex flex-wrap gap-3 mt-1">
+                        <span className="text-red-600">B: {item.buyPrice} {item.buyCurrency}</span>
+                        <span className="text-emerald-600">S: {item.sellPrice} {item.sellCurrency}</span>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">{buyerName}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(item)}
+                      className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title={t('edit')}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(item)}
+                      className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title={t('delete')}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {((sortMode === 'productName' && groupedItems.length === 0) ||
+          (sortMode === 'buyDate' && itemsByPurchaseDate.length === 0)) && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-12 text-center text-slate-400">
             <Package size={48} className="mx-auto mb-4 opacity-30" />
             <p>{t('inventory_empty')}</p>

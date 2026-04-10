@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Item, Participant, Product } from '../types';
 import { CURRENCIES } from '../constants';
-import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers, ArrowDownAZ } from 'lucide-react';
+import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers, ArrowDownAZ, User } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface InventoryProps {
@@ -510,6 +510,12 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                           {displayDate}
                         </span>
                         <span className="text-slate-300">·</span>
+                        <span className="flex items-center gap-1.5 min-w-0 max-w-full" title={buyerName}>
+                          <User size={14} className="shrink-0 text-slate-400" aria-hidden />
+                          <span className="text-slate-500 shrink-0">{t('buyer')}:</span>
+                          <span className="font-medium text-slate-800 truncate">{buyerName}</span>
+                        </span>
+                        <span className="text-slate-300">·</span>
                         <span className="text-slate-500">
                           {t('inventory_initial_amount')}: <span className="font-medium text-slate-700">{init}</span>
                         </span>
@@ -522,7 +528,6 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                         <span className="text-red-600">B: {item.buyPrice} {item.buyCurrency}</span>
                         <span className="text-emerald-600">S: {item.sellPrice} {item.sellCurrency}</span>
                       </div>
-                      <div className="text-xs text-slate-500 mt-1">{buyerName}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

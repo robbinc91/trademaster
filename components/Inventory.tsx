@@ -37,6 +37,12 @@ function purchaseTimestamp(item: Item): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Purchased quantity for this batch (fallback when older data has no initialQuantity). */
+function initialAmount(item: Item): number {
+  const n = item.initialQuantity;
+  return typeof n === 'number' && !Number.isNaN(n) ? n : item.quantity;
+}
+
 export const Inventory: React.FC<InventoryProps> = ({ items, participants, products, addProduct, addItem, editItem, deleteItem }) => {
   const { t } = useLanguage();
   const [showForm, setShowForm] = useState(false);
@@ -74,7 +80,8 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
         productName: data.product?.name || t('unknown'),
         product: data.product,
         items: sortedBatches,
-        totalQuantity: sortedBatches.reduce((sum, item) => sum + item.quantity, 0)
+        totalQuantity: sortedBatches.reduce((sum, item) => sum + item.quantity, 0),
+        totalInitialQuantity: sortedBatches.reduce((sum, item) => sum + initialAmount(item), 0)
       };
     }).sort((a, b) => a.productName.localeCompare(b.productName));
   }, [items, products, t]);
@@ -397,8 +404,14 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                   </div>
                   <div>
                     <p className="font-semibold text-slate-800">{group.productName}</p>
-                    <div className="flex items-center gap-2 text-sm text-slate-500">
-                      <span>{group.totalQuantity} {t('units')}</span>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
+                      <span>
+                        {t('inventory_initial_amount')}: <span className="font-medium text-slate-600">{group.totalInitialQuantity}</span>
+                      </span>
+                      <span className="text-slate-300">·</span>
+                      <span>
+                        {t('remaining')}: <span className="font-medium text-slate-600">{group.totalQuantity}</span> {t('units')}
+                      </span>
                       <span className="px-1.5 py-0.5 bg-slate-100 rounded text-xs">
                         {group.items.length} {group.items.length === 1 ? 'batch' : t('batches')}
                       </span>
@@ -406,8 +419,12 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-xs text-slate-500">{t('inventory_initial_amount')}</p>
+                    <p className="font-semibold text-slate-800">{group.totalInitialQuantity}</p>
+                  </div>
                   <div className="text-right">
-                    <p className="text-sm text-slate-500">{t('table_stock')}</p>
+                    <p className="text-xs text-slate-500">{t('remaining')}</p>
                     <p className="font-semibold text-slate-800">{group.totalQuantity}</p>
                   </div>
                   {expandedGroups.has(group.productId) ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -418,6 +435,7 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                 <div className="border-t border-slate-100 divide-y divide-slate-50">
                   {group.items.map(item => {
                     const buyerName = participants.find(p => p.id === item.buyerId)?.name || t('unknown');
+                    const init = initialAmount(item);
                     return (
                       <div key={item.id} className="p-4 hover:bg-slate-50">
                         <div className="flex items-center justify-between">
@@ -426,8 +444,14 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                               <Package size={16} />
                             </div>
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-slate-700">{item.quantity} {item.unit}</span>
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span className="text-sm text-slate-500">
+                                  {t('inventory_initial_amount')}: <span className="font-medium text-slate-700">{init}</span>
+                                </span>
+                                <span className="text-xs text-slate-400">•</span>
+                                <span className="font-medium text-slate-700">
+                                  {t('remaining')}: {item.quantity} {item.unit}
+                                </span>
                                 <span className="text-xs text-slate-400">•</span>
                                 <span className="text-sm text-slate-600">{item.dateAdded}</span>
                               </div>
@@ -470,6 +494,7 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
           itemsByPurchaseDate.map(({ item, productName }) => {
             const buyerName = participants.find(p => p.id === item.buyerId)?.name || t('unknown');
             const displayDate = item.purchaseDate || item.dateAdded;
+            const init = initialAmount(item);
             return (
               <div key={item.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 hover:bg-slate-50/80">
                 <div className="flex items-center justify-between gap-4">
@@ -485,7 +510,13 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
                           {displayDate}
                         </span>
                         <span className="text-slate-300">·</span>
-                        <span className="font-medium text-slate-700">{item.quantity} {item.unit}</span>
+                        <span className="text-slate-500">
+                          {t('inventory_initial_amount')}: <span className="font-medium text-slate-700">{init}</span>
+                        </span>
+                        <span className="text-slate-300">·</span>
+                        <span className="font-medium text-slate-700">
+                          {t('remaining')}: {item.quantity} {item.unit}
+                        </span>
                       </div>
                       <div className="text-sm flex flex-wrap gap-3 mt-1">
                         <span className="text-red-600">B: {item.buyPrice} {item.buyCurrency}</span>

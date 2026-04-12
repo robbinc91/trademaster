@@ -348,6 +348,15 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 if (d > endDay) endDay = d;
             }
         });
+        items.forEach(item => {
+            const raw = item.purchaseDate || item.dateAdded;
+            const ts = new Date(raw).getTime();
+            if (Number.isFinite(ts)) {
+                const d = new Date(ts);
+                d.setHours(0, 0, 0, 0);
+                if (d > endDay) endDay = d;
+            }
+        });
         if (endDay < startDay) endDay = new Date(startDay);
 
         const dayKey = (iso: string) => {
@@ -356,14 +365,32 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
         };
 
         const itemsMap = new Map(items.map(i => [i.id, i]));
-        type Agg = { revenue: number; units: number; cogs: number; sales: number };
+        type Agg = {
+            revenue: number;
+            units: number;
+            cogs: number;
+            sales: number;
+            saleTransport: number;
+            /** Inventory buy + purchase transport (same rules as Total Spending card), on purchase date */
+            purchaseSpend: number;
+        };
         const byDay = new Map<string, Agg>();
+
+        const emptyAgg = (): Agg => ({
+            revenue: 0,
+            units: 0,
+            cogs: 0,
+            sales: 0,
+            saleTransport: 0,
+            purchaseSpend: 0
+        });
 
         sales.forEach(sale => {
             const key = dayKey(sale.dateSold);
             if (!key || key.length < 8) return;
-            const cur: Agg = byDay.get(key) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+            const cur: Agg = byDay.get(key) || emptyAgg();
             cur.revenue += convertToTarget(sale.totalAmount || 0, sale.currency || 'CUP');
+            cur.saleTransport += convertToTarget(sale.transportCost || 0, sale.transportCurrency || 'CUP');
             cur.sales += 1;
             sale.items?.forEach(si => {
                 cur.units += si.quantity || 0;
@@ -373,6 +400,32 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                     cur.cogs += convertToTarget(c, orig.buyCurrency || 'CUP');
                 }
             });
+            byDay.set(key, cur);
+        });
+
+        // Same inclusion as spendingByParticipant + totalSpending (participant + per-line currency filter)
+        const invItems =
+            selectedParticipant === 'all'
+                ? items
+                : items.filter(item => item.buyerId === selectedParticipant);
+        invItems.forEach(item => {
+            if (!item.buyerId) return;
+            const key = dayKey(item.purchaseDate || item.dateAdded);
+            if (!key || key.length < 8) return;
+            const cur: Agg = byDay.get(key) || emptyAgg();
+            let p = 0;
+            const buy = (item.buyPrice || 0) * (item.initialQuantity || 0);
+            const buyCur = item.buyCurrency || 'CUP';
+            if (selectedCurrency === 'all' || buyCur === selectedCurrency) {
+                p += convertToTarget(buy, buyCur);
+            }
+            if (item.transportCost > 0) {
+                const trCur = item.transportCurrency || 'CUP';
+                if (selectedCurrency === 'all' || trCur === selectedCurrency) {
+                    p += convertToTarget(item.transportCost, trCur);
+                }
+            }
+            cur.purchaseSpend += p;
             byDay.set(key, cur);
         });
 
@@ -389,16 +442,21 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 dailyUnits: number;
                 dailyCogs: number;
                 dailySales: number;
+                dailyGlobalCost: number;
                 cumulativeRevenue: number;
+                cumulativeGlobalCost: number;
             }> = [];
             let cum = 0;
+            let cumGlobalCost = 0;
 
             if (bucket === 'day') {
                 const cursor = new Date(startDay);
                 while (cursor <= endDay) {
                     const key = cursor.toISOString().slice(0, 10);
-                    const agg = source.get(key) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+                    const agg = source.get(key) || emptyAgg();
+                    const dailyGlobalCost = agg.purchaseSpend + agg.saleTransport;
                     cum += agg.revenue;
+                    cumGlobalCost += dailyGlobalCost;
                     series.push({
                         date: key,
                         label: cursor.toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -406,7 +464,9 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                         dailyUnits: agg.units,
                         dailyCogs: agg.cogs,
                         dailySales: agg.sales,
-                        cumulativeRevenue: cum
+                        dailyGlobalCost,
+                        cumulativeRevenue: cum,
+                        cumulativeGlobalCost: cumGlobalCost
                     });
                     cursor.setDate(cursor.getDate() + 1);
                 }
@@ -414,11 +474,13 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 const byWeek = new Map<string, Agg>();
                 source.forEach((agg, key) => {
                     const wk = startOfWeekMonday(new Date(key + 'T12:00:00')).toISOString().slice(0, 10);
-                    const cur: Agg = byWeek.get(wk) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+                    const cur: Agg = byWeek.get(wk) || emptyAgg();
                     cur.revenue += agg.revenue;
                     cur.units += agg.units;
                     cur.cogs += agg.cogs;
                     cur.sales += agg.sales;
+                    cur.saleTransport += agg.saleTransport;
+                    cur.purchaseSpend += agg.purchaseSpend;
                     byWeek.set(wk, cur);
                 });
                 const wStart = startOfWeekMonday(startDay);
@@ -426,8 +488,10 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 const cursor = new Date(wStart);
                 while (cursor <= wEnd) {
                     const key = cursor.toISOString().slice(0, 10);
-                    const agg = byWeek.get(key) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+                    const agg = byWeek.get(key) || emptyAgg();
+                    const dailyGlobalCost = agg.purchaseSpend + agg.saleTransport;
                     cum += agg.revenue;
+                    cumGlobalCost += dailyGlobalCost;
                     series.push({
                         date: key,
                         label:
@@ -437,7 +501,9 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                         dailyUnits: agg.units,
                         dailyCogs: agg.cogs,
                         dailySales: agg.sales,
-                        cumulativeRevenue: cum
+                        dailyGlobalCost,
+                        cumulativeRevenue: cum,
+                        cumulativeGlobalCost: cumGlobalCost
                     });
                     cursor.setDate(cursor.getDate() + 7);
                 }
@@ -453,7 +519,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             fromLabel: startDay.toLocaleDateString(locale, { dateStyle: 'medium' }),
             toLabel: endDay.toLocaleDateString(locale, { dateStyle: 'medium' })
         };
-    }, [data.items, data.sales, data.rates, profitCurrency, language]);
+    }, [data.items, data.sales, data.rates, profitCurrency, language, selectedParticipant, selectedCurrency]);
 
     // 11. Sold Items Analysis (with currency conversion and productId grouping)
     const soldItemsAnalysis = useMemo(() => {
@@ -966,6 +1032,15 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                             fill="#93c5fd"
                                             fillOpacity={0.35}
                                             strokeWidth={2}
+                                        />
+                                        <Line
+                                            yAxisId="left"
+                                            type="monotone"
+                                            dataKey="cumulativeGlobalCost"
+                                            name={`${t('stats_chart_cumulative_global_cost')} (${profitCurrency})`}
+                                            stroke="#c2410c"
+                                            strokeWidth={2}
+                                            dot={false}
                                         />
                                         <Line
                                             yAxisId="right"

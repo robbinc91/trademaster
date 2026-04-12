@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, Download, Loader2, FileBarChart, Package, DollarSign, Receipt } from 'lucide-react';
+import { FileText, Download, Loader2, FileBarChart, Package, DollarSign, Receipt, Users, PackageMinus, BarChart3 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 //import { generateReport } from '../src/utils/pdfGenerator';
 import {
@@ -7,7 +7,11 @@ import {
   generateInventoryHtml,
   generateProfitLossHtml,
   generateSalesHistoryHtml,
-  generateAdjustmentsHtml
+  generateAdjustmentsHtml,
+  generatePartnerStatementHtml,
+  generateSelfTakeLogHtml,
+  generateMarginByProductHtml,
+  wrapReportHtml
 } from '../src/utils/htmlPdfGenerator';
 
 interface ReportsProps {
@@ -23,9 +27,10 @@ interface ReportType {
 }
 
 export const Reports: React.FC<ReportsProps> = ({ data }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [generating, setGenerating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const reportTypes: ReportType[] = [
     {
@@ -55,64 +60,116 @@ export const Reports: React.FC<ReportsProps> = ({ data }) => {
       descKey: 'report_sales_history_desc',
       icon: <Receipt size={24} />,
       color: 'from-purple-500 to-purple-600'
+    },
+    {
+      id: 'partner_statement',
+      nameKey: 'report_partner_statement',
+      descKey: 'report_partner_statement_desc',
+      icon: <Users size={24} />,
+      color: 'from-cyan-500 to-cyan-600'
+    },
+    {
+      id: 'self_take_log',
+      nameKey: 'report_self_take_log',
+      descKey: 'report_self_take_log_desc',
+      icon: <PackageMinus size={24} />,
+      color: 'from-rose-500 to-rose-600'
+    },
+    {
+      id: 'margin_by_product',
+      nameKey: 'report_margin_by_product',
+      descKey: 'report_margin_by_product_desc',
+      icon: <BarChart3 size={24} />,
+      color: 'from-indigo-500 to-indigo-600'
     }
   ];
 
   const handleGenerateReport = async (reportType: string) => {
     setGenerating(reportType);
     setError(null);
+    setInfo(null);
 
     try {
-      let htmlContent = '';
+      let fragment = '';
       let filename = '';
       const timestamp = new Date().getTime();
 
       switch (reportType) {
         case 'sales_summary':
-          htmlContent = generateSalesSummaryHtml(data);
+          fragment = generateSalesSummaryHtml(data, t, language);
           filename = `TradeMaster_Sales_Summary_${timestamp}.pdf`;
           break;
         case 'inventory':
-          htmlContent = generateInventoryHtml(data);
+          fragment = generateInventoryHtml(data, t, language);
           filename = `TradeMaster_Inventory_${timestamp}.pdf`;
           break;
         case 'profit_loss':
-          htmlContent = generateProfitLossHtml(data);
+          fragment = generateProfitLossHtml(data, t, language);
           filename = `TradeMaster_Profit_Loss_${timestamp}.pdf`;
           break;
         case 'sales_history':
-          htmlContent = generateSalesHistoryHtml(data);
+          fragment = generateSalesHistoryHtml(data, t, language);
           filename = `TradeMaster_Sales_History_${timestamp}.pdf`;
           break;
-        case 'adjustments': // New report type you can add a button for!
-          htmlContent = generateAdjustmentsHtml(data);
+        case 'adjustments':
+          fragment = generateAdjustmentsHtml(data, t, language);
           filename = `TradeMaster_Partner_Adjustments_${timestamp}.pdf`;
+          break;
+        case 'partner_statement':
+          fragment = generatePartnerStatementHtml(data, t, language);
+          filename = `TradeMaster_Partner_Statement_${timestamp}.pdf`;
+          break;
+        case 'self_take_log':
+          fragment = generateSelfTakeLogHtml(data, t, language);
+          filename = `TradeMaster_Self_Take_Log_${timestamp}.pdf`;
+          break;
+        case 'margin_by_product':
+          fragment = generateMarginByProductHtml(data, t, language);
+          filename = `TradeMaster_Margin_By_Product_${timestamp}.pdf`;
           break;
         default:
           throw new Error(`Report type '${reportType}' is not implemented yet.`);
       }
 
+      const fullHtml = wrapReportHtml(fragment, language);
       const electron = (window as any).electron;
 
-      if (electron && electron.exportPdf) {
-        const result = await electron.exportPdf(htmlContent, filename);
-        if (result.success) {
-          console.log("PDF saved successfully to:", result.filePath);
+      if (electron && typeof electron.exportPdf === 'function') {
+        const result = await electron.exportPdf(fullHtml, filename);
+        if (result?.canceled) {
+          return;
         }
-      } else {
-        throw new Error("Electron API is not available.");
+        if (!result?.success) {
+          setError(t('report_error'));
+          return;
+        }
+        console.log('PDF saved successfully to:', result.filePath);
+        return;
       }
 
+      // Browser / dev: download HTML with the same layout; user can print to PDF
+      const htmlName = filename.replace(/\.pdf$/i, '.html');
+      const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = htmlName;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setInfo(t('report_html_saved'));
     } catch (err: any) {
       console.error('Report generation error:', err);
-      setError(err.message || 'Failed to generate report');
+      setError(err.message || t('report_error'));
     } finally {
       setGenerating(null);
     }
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-6 animate-fade-in">
+    <div className="p-8 max-w-6xl mx-auto space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -124,11 +181,16 @@ export const Reports: React.FC<ReportsProps> = ({ data }) => {
         </div>
       </div>
 
-      {/* Error Message */}
+      {/* Error / info */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">
           <p className="font-medium">{t('report_error') || 'Error generating report'}</p>
           <p className="text-sm mt-1">{error}</p>
+        </div>
+      )}
+      {info && !error && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-800">
+          <p className="text-sm">{info}</p>
         </div>
       )}
 

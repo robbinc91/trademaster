@@ -1,17 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { Item, Participant, Product } from '../types';
+import { Item, Participant, Product, SelfTake, AddSelfTakeInput } from '../types';
 import { CURRENCIES } from '../constants';
-import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers, ArrowDownAZ, User } from 'lucide-react';
+import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers, ArrowDownAZ, User, PackageMinus, RotateCcw } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface InventoryProps {
   items: Item[];
   participants: Participant[];
   products: Product[];
+  selfTakes: SelfTake[];
   addProduct: (name: string) => string;
   addItem: (item: Omit<Item, 'id'>) => void;
   editItem: (id: string, item: Omit<Item, 'id'>) => void;
   deleteItem: (id: string) => void;
+  addSelfTake: (input: AddSelfTakeInput) => boolean;
+  deleteSelfTake: (id: string) => void;
 }
 
 const emptyFormData = {
@@ -29,6 +32,14 @@ const emptyFormData = {
   dateAdded: new Date().toISOString().split('T')[0]
 };
 
+const emptySelfTakeForm = {
+  productId: '',
+  quantity: '',
+  participantId: '',
+  date: new Date().toISOString().split('T')[0],
+  note: ''
+};
+
 type InventorySortMode = 'productName' | 'buyDate';
 
 function purchaseTimestamp(item: Item): number {
@@ -43,15 +54,29 @@ function initialAmount(item: Item): number {
   return typeof n === 'number' && !Number.isNaN(n) ? n : item.quantity;
 }
 
-export const Inventory: React.FC<InventoryProps> = ({ items, participants, products, addProduct, addItem, editItem, deleteItem }) => {
+export const Inventory: React.FC<InventoryProps> = ({
+  items,
+  participants,
+  products,
+  selfTakes,
+  addProduct,
+  addItem,
+  editItem,
+  deleteItem,
+  addSelfTake,
+  deleteSelfTake
+}) => {
   const { t } = useLanguage();
   const [showForm, setShowForm] = useState(false);
+  const [showSelfTakeForm, setShowSelfTakeForm] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [sortMode, setSortMode] = useState<InventorySortMode>('productName');
+  const [showSelfTakeHistory, setShowSelfTakeHistory] = useState(true);
 
   // Form State
   const [formData, setFormData] = useState(emptyFormData);
+  const [selfTakeForm, setSelfTakeForm] = useState(emptySelfTakeForm);
   const [showNewProductInput, setShowNewProductInput] = useState(false);
 
   // Group items by productId (sorted by product name; batches inside each group by purchase date, newest first)
@@ -100,6 +125,27 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
       });
   }, [items, products, t]);
 
+  const productsWithStock = useMemo(() => {
+    return groupedItems.filter(g => g.totalQuantity > 0);
+  }, [groupedItems]);
+
+  const selfTakesSorted = useMemo(() => {
+    return [...selfTakes].sort((a, b) => {
+      const da = new Date(a.date).getTime();
+      const db = new Date(b.date).getTime();
+      return db - da;
+    });
+  }, [selfTakes]);
+
+  const describeSelfTake = (st: SelfTake): string => {
+    const parts = st.lines.map(line => {
+      const invItem = items.find(i => i.id === line.itemId);
+      const name = products.find(p => p.id === invItem?.productId)?.name || t('unknown');
+      return `${line.quantity}× ${name}`;
+    });
+    return parts.join(', ');
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -116,6 +162,44 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
     }
   };
 
+  const resetSelfTakeForm = () => {
+    setSelfTakeForm(emptySelfTakeForm);
+  };
+
+  const handleSelfTakeField = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setSelfTakeForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSelfTakeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const qty = parseFloat(selfTakeForm.quantity.replace(',', '.'));
+    if (!selfTakeForm.productId || !selfTakeForm.participantId || !Number.isFinite(qty) || qty <= 0) {
+      alert(t('self_take_error_form'));
+      return;
+    }
+    const input: AddSelfTakeInput = {
+      productId: selfTakeForm.productId,
+      quantity: qty,
+      participantId: selfTakeForm.participantId,
+      date: selfTakeForm.date,
+      note: selfTakeForm.note.trim() || undefined
+    };
+    const ok = addSelfTake(input);
+    if (!ok) {
+      alert(t('self_take_error_stock'));
+      return;
+    }
+    resetSelfTakeForm();
+  };
+
+  const handleDeleteSelfTake = (st: SelfTake) => {
+    const total = st.lines.reduce((s, l) => s + l.quantity, 0);
+    if (confirm(`${t('self_take_confirm_undo')}\n\n${describeSelfTake(st)}\n(${total} ${t('quantity')})`)) {
+      deleteSelfTake(st.id);
+    }
+  };
+
   const resetForm = () => {
     setFormData(emptyFormData);
     setEditingItem(null);
@@ -124,6 +208,8 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
   };
 
   const handleEdit = (item: Item) => {
+    setShowSelfTakeForm(false);
+    resetSelfTakeForm();
     setEditingItem(item);
     setFormData({
       productId: item.productId || '',
@@ -213,24 +299,47 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
 
   return (
     <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-3xl font-bold text-slate-800">{t('inventory_purchases')}</h2>
           <p className="text-slate-500 mt-1">{t('register_stock')}</p>
         </div>
-        <button
-          onClick={() => {
-            if (showForm) {
-              resetForm();
-            } else {
-              setShowForm(true);
-            }
-          }}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-        >
-          {showForm ? <X size={18} /> : <Plus size={18} />}
-          {showForm ? t('cancel') : t('new_purchase')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (showForm) {
+                resetForm();
+              } else {
+                setShowSelfTakeForm(false);
+                resetSelfTakeForm();
+                setShowForm(true);
+              }
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            {showForm ? <X size={18} /> : <Plus size={18} />}
+            {showForm ? t('cancel') : t('new_purchase')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (showSelfTakeForm) {
+                resetSelfTakeForm();
+                setShowSelfTakeForm(false);
+              } else {
+                setShowForm(false);
+                resetForm();
+                setEditingItem(null);
+                setShowSelfTakeForm(true);
+              }
+            }}
+            className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors flex items-center gap-2"
+          >
+            {showSelfTakeForm ? <X size={18} /> : <PackageMinus size={18} />}
+            {showSelfTakeForm ? t('cancel') : t('self_take_btn')}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -386,6 +495,136 @@ export const Inventory: React.FC<InventoryProps> = ({ items, participants, produ
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {showSelfTakeForm && (
+        <div className="bg-white p-6 rounded-xl shadow-lg border border-amber-100 animate-slide-in-down">
+          <h3 className="text-lg font-semibold mb-1 text-slate-800">{t('self_take_form_title')}</h3>
+          <p className="text-sm text-slate-500 mb-4">{t('self_take_subtitle')}</p>
+          <form onSubmit={handleSelfTakeSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('select_product')}</label>
+              <select
+                name="productId"
+                value={selfTakeForm.productId}
+                onChange={handleSelfTakeField}
+                className="w-full border rounded-md p-2 bg-slate-50"
+                required
+              >
+                <option value="">{t('choose_product_placeholder')}</option>
+                {productsWithStock.map(g => (
+                  <option key={g.productId} value={g.productId}>
+                    {g.productName} ({g.totalQuantity} {t('units')})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('quantity')}</label>
+              <input
+                type="number"
+                name="quantity"
+                min="0"
+                step="any"
+                value={selfTakeForm.quantity}
+                onChange={handleSelfTakeField}
+                className="w-full border rounded-md p-2"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('date_purchase')}</label>
+              <input
+                type="date"
+                name="date"
+                value={selfTakeForm.date}
+                onChange={handleSelfTakeField}
+                className="w-full border rounded-md p-2"
+                required
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('self_take_partner')}</label>
+              <select
+                name="participantId"
+                value={selfTakeForm.participantId}
+                onChange={handleSelfTakeField}
+                className="w-full border rounded-md p-2 bg-slate-50"
+                required
+              >
+                <option value="">{t('select_participant')}</option>
+                {participants.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1">{t('self_take_note')}</label>
+              <textarea
+                name="note"
+                value={selfTakeForm.note}
+                onChange={handleSelfTakeField}
+                rows={2}
+                className="w-full border rounded-md p-2"
+                placeholder={t('self_take_note_placeholder')}
+              />
+            </div>
+            <div className="col-span-full flex justify-end">
+              <button type="submit" className="bg-amber-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-amber-700 transition-colors">
+                {t('self_take_submit')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {selfTakesSorted.length > 0 && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className={`flex flex-wrap items-center justify-between gap-3 ${showSelfTakeHistory ? 'mb-4' : ''}`}>
+            <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
+              <PackageMinus size={20} className="text-amber-600 shrink-0" />
+              <span>{t('self_take_history')}</span>
+              <span className="text-sm font-normal text-slate-500">({selfTakesSorted.length})</span>
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowSelfTakeHistory(v => !v)}
+              className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg hover:bg-slate-100 border border-slate-200 shrink-0"
+              aria-expanded={showSelfTakeHistory}
+            >
+              {showSelfTakeHistory ? <ChevronUp size={18} aria-hidden /> : <ChevronDown size={18} aria-hidden />}
+              {showSelfTakeHistory ? t('self_take_history_hide') : t('self_take_history_show')}
+            </button>
+          </div>
+          {showSelfTakeHistory && (
+            <ul className="divide-y divide-slate-100">
+              {selfTakesSorted.map(st => {
+                const partnerName = participants.find(p => p.id === st.participantId)?.name || t('unknown');
+                const total = st.lines.reduce((s, l) => s + l.quantity, 0);
+                return (
+                  <li key={st.id} className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-800">{st.date} · {partnerName}</p>
+                      <p className="text-sm text-slate-600 break-words">{describeSelfTake(st)}</p>
+                      {st.note && <p className="text-xs text-slate-500 mt-1">{st.note}</p>}
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-sm text-slate-500">{total} {t('quantity')}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSelfTake(st)}
+                        className="flex items-center gap-1 text-sm text-amber-700 hover:text-amber-900 px-2 py-1 rounded-lg hover:bg-amber-50"
+                      >
+                        <RotateCcw size={16} />
+                        {t('self_take_undo')}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
 

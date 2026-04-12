@@ -44,10 +44,19 @@ Built with React, Vite, TypeScript, and Electron, it provides the smooth, respon
     ```
 
 3.  **Environment Setup:**
-    Create a `.env` file in the root directory and add your Gemini API key for the AI Analyst feature:
+    Create a `.env` file in the root directory and add your Gemini API key for the AI Analyst feature (either name works):
     ```env
     VITE_GEMINI_API_KEY=your_api_key_here
     ```
+    Or:
+    ```env
+    GEMINI_API_KEY=your_api_key_here
+    ```
+    Optional: override the model (default is `gemini-2.0-flash`):
+    ```env
+    GEMINI_MODEL=gemini-2.0-flash
+    ```
+    Restart `npm run dev` after changing `.env`.
 
 ### Running the Application
 

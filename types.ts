@@ -65,11 +65,35 @@ export interface Adjustment {
   note?: string;
 }
 
+/** One line in a partner self-take (stock removed from a purchase batch). */
+export interface SelfTakeLine {
+  itemId: string;
+  quantity: number;
+}
+
+/** Partners remove stock from inventory without a customer sale (FIFO across batches). */
+export interface SelfTake {
+  id: string;
+  date: string;
+  participantId: string;
+  lines: SelfTakeLine[];
+  note?: string;
+}
+
+export type AddSelfTakeInput = {
+  productId: string;
+  quantity: number;
+  participantId: string;
+  date: string;
+  note?: string;
+};
+
 export interface StoreData {
   participants: Participant[];
   products: Product[];  // New: Product catalog
   items: Item[];
   sales: Sale[];
+  selfTakes: SelfTake[];
   rates: ConversionRates;
   adjustments: Adjustment[];
   language: 'en' | 'es';

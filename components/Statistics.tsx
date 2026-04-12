@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { StoreData, CurrencyTotal } from '../types';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, LabelList } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Filter, Users, Package, PackageCheck, ArrowUpRight, ArrowDownRight, ShoppingCart, Award, AlertTriangle, BarChart3 } from 'lucide-react';
+import {
+    PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, LabelList,
+    Line, Area, CartesianGrid, ComposedChart
+} from 'recharts';
+import { DollarSign, TrendingUp, TrendingDown, Filter, Users, Package, PackageCheck, ArrowUpRight, ArrowDownRight, ShoppingCart, Award, AlertTriangle, BarChart3, LineChart as LineChartIcon } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface StatisticsProps {
@@ -14,8 +17,17 @@ const PIE_COLORS = [
     '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
 ];
 
+function startOfWeekMonday(d: Date): Date {
+    const x = new Date(d);
+    const day = x.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    x.setDate(x.getDate() + diff);
+    x.setHours(0, 0, 0, 0);
+    return x;
+}
+
 export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
-    const { t } = useLanguage();
+    const { t, language } = useLanguage();
 
     // Filter states
     const [selectedParticipant, setSelectedParticipant] = useState<string>('all');
@@ -267,13 +279,181 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             });
         });
 
+        let selfTakenItems = 0;
+        (data.selfTakes || []).forEach(st => {
+            st.lines.forEach(line => {
+                selfTakenItems += line.quantity;
+            });
+        });
+
+        const outflowItems = soldItems + selfTakenItems;
+
         return {
             total: totalItems,
             sold: soldItems,
+            selfTaken: selfTakenItems,
             remaining: remainingItems,
-            soldPercentage: totalItems > 0 ? (soldItems / totalItems) * 100 : 0
+            soldPercentage: totalItems > 0 ? (soldItems / totalItems) * 100 : 0,
+            selfTakenPercentage: totalItems > 0 ? (selfTakenItems / totalItems) * 100 : 0,
+            outflowPercentage: totalItems > 0 ? (outflowItems / totalItems) * 100 : 0
         };
-    }, [data.items, data.sales]);
+    }, [data.items, data.sales, data.selfTakes]);
+
+    // 10b. Time series from first purchase through latest activity (sales-based metrics)
+    const activityTimeline = useMemo(() => {
+        const items = data.items || [];
+        const sales = data.sales || [];
+        const rates = data.rates;
+
+        const convertToTarget = (amount: number, fromCurrency: string): number => {
+            if (!amount) return 0;
+            if (fromCurrency === profitCurrency) return amount;
+            let valueInCUP = amount;
+            if (fromCurrency === 'USD') valueInCUP = amount * rates.USD;
+            else if (fromCurrency === 'EUR') valueInCUP = amount * rates.EUR;
+            else if (fromCurrency === 'CUP') valueInCUP = amount;
+            else valueInCUP = amount;
+
+            if (profitCurrency === 'USD') return valueInCUP / rates.USD;
+            if (profitCurrency === 'EUR') return valueInCUP / rates.EUR;
+            return valueInCUP;
+        };
+
+        let firstTs = Infinity;
+        items.forEach(item => {
+            const raw = item.purchaseDate || item.dateAdded;
+            const ts = new Date(raw).getTime();
+            if (Number.isFinite(ts)) firstTs = Math.min(firstTs, ts);
+        });
+        if (sales.length > 0 && (!Number.isFinite(firstTs) || firstTs === Infinity)) {
+            sales.forEach(sale => {
+                const ts = new Date(sale.dateSold).getTime();
+                if (Number.isFinite(ts)) firstTs = Math.min(firstTs, ts);
+            });
+        }
+        if (!Number.isFinite(firstTs) || firstTs === Infinity) {
+            return null;
+        }
+
+        const startDay = new Date(firstTs);
+        startDay.setHours(0, 0, 0, 0);
+
+        let endDay = new Date();
+        endDay.setHours(0, 0, 0, 0);
+        sales.forEach(sale => {
+            const ts = new Date(sale.dateSold).getTime();
+            if (Number.isFinite(ts)) {
+                const d = new Date(ts);
+                d.setHours(0, 0, 0, 0);
+                if (d > endDay) endDay = d;
+            }
+        });
+        if (endDay < startDay) endDay = new Date(startDay);
+
+        const dayKey = (iso: string) => {
+            if (!iso) return '';
+            return iso.includes('T') ? iso.split('T')[0] : iso.slice(0, 10);
+        };
+
+        const itemsMap = new Map(items.map(i => [i.id, i]));
+        type Agg = { revenue: number; units: number; cogs: number; sales: number };
+        const byDay = new Map<string, Agg>();
+
+        sales.forEach(sale => {
+            const key = dayKey(sale.dateSold);
+            if (!key || key.length < 8) return;
+            const cur: Agg = byDay.get(key) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+            cur.revenue += convertToTarget(sale.totalAmount || 0, sale.currency || 'CUP');
+            cur.sales += 1;
+            sale.items?.forEach(si => {
+                cur.units += si.quantity || 0;
+                const orig = itemsMap.get(si.itemId);
+                if (orig) {
+                    const c = (orig.buyPrice || 0) * (si.quantity || 0);
+                    cur.cogs += convertToTarget(c, orig.buyCurrency || 'CUP');
+                }
+            });
+            byDay.set(key, cur);
+        });
+
+        const spanDays =
+            Math.ceil((endDay.getTime() - startDay.getTime()) / 86400000) + 1;
+        const useWeekly = spanDays > 120;
+        const locale = language === 'es' ? 'es-ES' : 'en-US';
+
+        const buildSeries = (bucket: 'day' | 'week', source: Map<string, Agg>) => {
+            const series: Array<{
+                date: string;
+                label: string;
+                dailyRevenue: number;
+                dailyUnits: number;
+                dailyCogs: number;
+                dailySales: number;
+                cumulativeRevenue: number;
+            }> = [];
+            let cum = 0;
+
+            if (bucket === 'day') {
+                const cursor = new Date(startDay);
+                while (cursor <= endDay) {
+                    const key = cursor.toISOString().slice(0, 10);
+                    const agg = source.get(key) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+                    cum += agg.revenue;
+                    series.push({
+                        date: key,
+                        label: cursor.toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' }),
+                        dailyRevenue: agg.revenue,
+                        dailyUnits: agg.units,
+                        dailyCogs: agg.cogs,
+                        dailySales: agg.sales,
+                        cumulativeRevenue: cum
+                    });
+                    cursor.setDate(cursor.getDate() + 1);
+                }
+            } else {
+                const byWeek = new Map<string, Agg>();
+                source.forEach((agg, key) => {
+                    const wk = startOfWeekMonday(new Date(key + 'T12:00:00')).toISOString().slice(0, 10);
+                    const cur: Agg = byWeek.get(wk) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+                    cur.revenue += agg.revenue;
+                    cur.units += agg.units;
+                    cur.cogs += agg.cogs;
+                    cur.sales += agg.sales;
+                    byWeek.set(wk, cur);
+                });
+                const wStart = startOfWeekMonday(startDay);
+                const wEnd = startOfWeekMonday(endDay);
+                const cursor = new Date(wStart);
+                while (cursor <= wEnd) {
+                    const key = cursor.toISOString().slice(0, 10);
+                    const agg = byWeek.get(key) || { revenue: 0, units: 0, cogs: 0, sales: 0 };
+                    cum += agg.revenue;
+                    series.push({
+                        date: key,
+                        label:
+                            cursor.toLocaleDateString(locale, { month: 'short', day: 'numeric' }) +
+                            (language === 'es' ? ' (sem.)' : ' (wk)'),
+                        dailyRevenue: agg.revenue,
+                        dailyUnits: agg.units,
+                        dailyCogs: agg.cogs,
+                        dailySales: agg.sales,
+                        cumulativeRevenue: cum
+                    });
+                    cursor.setDate(cursor.getDate() + 7);
+                }
+            }
+            return series;
+        };
+
+        const series = useWeekly ? buildSeries('week', byDay) : buildSeries('day', byDay);
+
+        return {
+            series,
+            granularity: useWeekly ? 'week' as const : 'day' as const,
+            fromLabel: startDay.toLocaleDateString(locale, { dateStyle: 'medium' }),
+            toLabel: endDay.toLocaleDateString(locale, { dateStyle: 'medium' })
+        };
+    }, [data.items, data.sales, data.rates, profitCurrency, language]);
 
     // 11. Sold Items Analysis (with currency conversion and productId grouping)
     const soldItemsAnalysis = useMemo(() => {
@@ -621,7 +801,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                     <Package size={18} className="text-slate-500" />
                     <h3 className="text-lg font-semibold text-slate-800">{t('inventory_summary')}</h3>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <div className="text-center p-4 bg-slate-50 rounded-lg">
                         <p className="text-2xl font-bold text-slate-800">{inventorySummary.total}</p>
                         <p className="text-sm text-slate-500">{t('total_purchased')}</p>
@@ -630,29 +810,184 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                         <p className="text-2xl font-bold text-emerald-700">{inventorySummary.sold}</p>
                         <p className="text-sm text-emerald-600">{t('total_sold')}</p>
                     </div>
+                    <div className="text-center p-4 bg-orange-50 rounded-lg">
+                        <p className="text-2xl font-bold text-orange-700">{inventorySummary.selfTaken}</p>
+                        <p className="text-sm text-orange-600">{t('total_self_taken')}</p>
+                    </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                         <p className="text-2xl font-bold text-blue-700">{inventorySummary.remaining}</p>
                         <p className="text-sm text-blue-600">{t('remaining_stock')}</p>
                     </div>
                     <div className="text-center p-4 bg-amber-50 rounded-lg">
-                        <p className="text-2xl font-bold text-amber-700">{inventorySummary.soldPercentage.toFixed(1)}%</p>
+                        <p className="text-2xl font-bold text-amber-700">{inventorySummary.outflowPercentage.toFixed(1)}%</p>
                         <p className="text-sm text-amber-600">{t('sell_through_rate')}</p>
                     </div>
                 </div>
-                {/* Progress bar */}
+                {/* Progress bar: sales + partner withdrawals vs initial stock */}
                 <div className="mt-4">
-                    <div className="flex justify-between text-sm text-slate-500 mb-1">
-                        <span>{t('sold')}: {inventorySummary.sold}</span>
+                    <div className="flex flex-wrap justify-between gap-2 text-sm text-slate-500 mb-1">
+                        <span>{t('sold')}: {inventorySummary.sold} · {t('total_self_taken')}: {inventorySummary.selfTaken}</span>
                         <span>{t('remaining')}: {inventorySummary.remaining}</span>
                     </div>
-                    <div className="w-full bg-slate-200 rounded-full h-3">
+                    <div className="w-full bg-slate-200 rounded-full h-3 relative overflow-hidden">
                         <div
-                            className="bg-emerald-500 h-3 rounded-full transition-all duration-500"
+                            className="absolute inset-y-0 left-0 bg-emerald-500 rounded-l-full transition-all duration-500"
                             style={{ width: `${inventorySummary.soldPercentage}%` }}
-                        ></div>
+                            title={`${t('total_sold')}: ${inventorySummary.sold}`}
+                        />
+                        <div
+                            className="absolute inset-y-0 bg-orange-400 transition-all duration-500"
+                            style={{
+                                left: `${inventorySummary.soldPercentage}%`,
+                                width: `${inventorySummary.selfTakenPercentage}%`
+                            }}
+                            title={`${t('total_self_taken')}: ${inventorySummary.selfTaken}`}
+                        />
                     </div>
                 </div>
             </div>
+
+            {/* Activity timeline: from first purchase */}
+            {activityTimeline && activityTimeline.series.length > 0 && (
+                <div className="space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-sky-100 text-sky-700 rounded-lg shrink-0">
+                                <LineChartIcon size={22} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-bold text-slate-800">{t('stats_timeline_title')}</h3>
+                                <p className="text-sm text-slate-500 mt-0.5">{t('stats_timeline_desc')}</p>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    {activityTimeline.fromLabel} — {activityTimeline.toLabel}
+                                    {activityTimeline.granularity === 'week' && (
+                                        <span className="ml-2 text-amber-600">· {t('stats_timeline_weekly')}</span>
+                                    )}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                        {/* Sold items: revenue, COGS, units */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                            <h4 className="text-lg font-semibold text-slate-800 mb-1">{t('stats_timeline_sold_title')}</h4>
+                            <p className="text-sm text-slate-500 mb-4">{t('stats_timeline_sold_sub')}</p>
+                            <div className="h-72 w-full min-w-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={activityTimeline.series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                        <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />
+                                        <YAxis
+                                            yAxisId="left"
+                                            tick={{ fontSize: 11 }}
+                                            tickFormatter={v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0))}
+                                            width={48}
+                                        />
+                                        <YAxis
+                                            yAxisId="right"
+                                            orientation="right"
+                                            tick={{ fontSize: 11 }}
+                                            width={40}
+                                        />
+                                        <Tooltip
+                                            formatter={(value: number, name: string) => [
+                                                typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value,
+                                                name
+                                            ]}
+                                            labelStyle={{ color: '#334155' }}
+                                            contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                        />
+                                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                                        <Line
+                                            yAxisId="left"
+                                            type="monotone"
+                                            dataKey="dailyRevenue"
+                                            name={`${t('stats_chart_daily_revenue')} (${profitCurrency})`}
+                                            stroke="#2563eb"
+                                            strokeWidth={2}
+                                            dot={false}
+                                        />
+                                        <Line
+                                            yAxisId="left"
+                                            type="monotone"
+                                            dataKey="dailyCogs"
+                                            name={`${t('stats_chart_daily_cogs')} (${profitCurrency})`}
+                                            stroke="#dc2626"
+                                            strokeWidth={1.5}
+                                            strokeDasharray="4 4"
+                                            dot={false}
+                                        />
+                                        <Line
+                                            yAxisId="right"
+                                            type="monotone"
+                                            dataKey="dailyUnits"
+                                            name={t('stats_chart_units_sold')}
+                                            stroke="#059669"
+                                            strokeWidth={2}
+                                            dot={false}
+                                        />
+                                    </ComposedChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* General: cumulative revenue + sales count */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                            <h4 className="text-lg font-semibold text-slate-800 mb-1">{t('stats_timeline_general_title')}</h4>
+                            <p className="text-sm text-slate-500 mb-4">{t('stats_timeline_general_sub')}</p>
+                            <div className="h-72 w-full min-w-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={activityTimeline.series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                        <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />
+                                        <YAxis
+                                            yAxisId="left"
+                                            tick={{ fontSize: 11 }}
+                                            tickFormatter={v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0))}
+                                            width={48}
+                                        />
+                                        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} width={36} allowDecimals={false} />
+                                        <Tooltip
+                                            formatter={(value: number, name: string) => [
+                                                typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value,
+                                                name
+                                            ]}
+                                            labelStyle={{ color: '#334155' }}
+                                            contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                        />
+                                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                                        <Area
+                                            yAxisId="left"
+                                            type="monotone"
+                                            dataKey="cumulativeRevenue"
+                                            name={`${t('stats_chart_cumulative_revenue')} (${profitCurrency})`}
+                                            stroke="#1d4ed8"
+                                            fill="#93c5fd"
+                                            fillOpacity={0.35}
+                                            strokeWidth={2}
+                                        />
+                                        <Line
+                                            yAxisId="right"
+                                            type="monotone"
+                                            dataKey="dailySales"
+                                            name={t('stats_chart_sales_count')}
+                                            stroke="#d97706"
+                                            strokeWidth={2}
+                                            dot={false}
+                                        />
+                                    </ComposedChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {(!activityTimeline || activityTimeline.series.length === 0) && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center text-slate-500 text-sm">
+                    {t('stats_timeline_empty')}
+                </div>
+            )}
 
             {/* Partial Earnings Section */}
             <div className="bg-gradient-to-r from-emerald-50 to-blue-50 p-6 rounded-xl shadow-sm border border-emerald-200">

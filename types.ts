@@ -40,6 +40,8 @@ export interface Sale {
   products: Product[];
   transportCost: number;
   transportCurrency: string;
+  /** When set, sale delivery transport is counted as that partner's spending (Statistics / Balance). */
+  transportPaidByParticipantId?: string;
   address: string;
   customerPhone: string;
   totalAmount: number;

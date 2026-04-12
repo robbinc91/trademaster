@@ -656,8 +656,24 @@ const AppContent: React.FC = () => {
           deleteSelfTake={deleteSelfTake}
         />
       );
-      case TABS.SALES: return <Sales items={storeData.items} products={storeData.products || []} addSale={addSale} />;
-      case TABS.SALES_HISTORY: return <SalesHistory sales={storeData.sales || []} products={storeData.products || []} items={storeData.items} editSale={editSale} deleteSale={deleteSale} />;
+      case TABS.SALES: return (
+        <Sales
+          items={storeData.items}
+          products={storeData.products || []}
+          participants={storeData.participants}
+          addSale={addSale}
+        />
+      );
+      case TABS.SALES_HISTORY: return (
+        <SalesHistory
+          sales={storeData.sales || []}
+          products={storeData.products || []}
+          items={storeData.items}
+          participants={storeData.participants}
+          editSale={editSale}
+          deleteSale={deleteSale}
+        />
+      );
       case TABS.EXCHANGE: return <ExchangeRates rates={storeData.rates} onUpdate={updateRates} />;
       case TABS.REPORTS: return <Reports data={storeData} />;
       case TABS.AI_INSIGHTS: return <AIAnalyst data={storeData} />;

@@ -74,8 +74,22 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             }
         });
 
+        // Sale delivery transport paid by a partner (same as Balance / partner spending)
+        const filteredSales =
+            selectedParticipant === 'all'
+                ? data.sales
+                : data.sales.filter(s => s.transportPaidByParticipantId === selectedParticipant);
+        filteredSales.forEach(sale => {
+            if (!sale.transportCost || sale.transportCost <= 0) return;
+            const payerId = sale.transportPaidByParticipantId;
+            if (!payerId) return;
+            if (!stats[payerId]) stats[payerId] = {};
+            const tc = sale.transportCurrency || 'N/A';
+            stats[payerId][tc] = (stats[payerId][tc] || 0) + sale.transportCost;
+        });
+
         return stats;
-    }, [data.items, selectedParticipant]);
+    }, [data.items, data.sales, selectedParticipant]);
 
     // 1b. Calculate adjustments by participant
     const adjustmentsByParticipant = useMemo(() => {
@@ -214,10 +228,23 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
         return total;
     }, [salesTransportCosts, profitCurrency, data.rates]);
 
-    // 8. Calculate profit (Revenue - Spending - Sales Transport)
+    /** Transport already included in spendingByParticipant (avoids double-count in net profit). */
+    const attributedSaleTransportTotal = useMemo(() => {
+        let total = 0;
+        data.sales.forEach(sale => {
+            if (!sale.transportCost || sale.transportCost <= 0) return;
+            if (!sale.transportPaidByParticipantId) return;
+            total +=
+                sale.transportCost *
+                getConversionRate(sale.transportCurrency || 'CUP', profitCurrency);
+        });
+        return total;
+    }, [data.sales, profitCurrency, data.rates]);
+
+    // 8. Calculate profit (Revenue - Spending - Sales Transport; attributed transport is inside spending)
     const profit = useMemo(() => {
-        return totalRevenue - totalSpending - totalSalesTransport;
-    }, [totalRevenue, totalSpending, totalSalesTransport]);
+        return totalRevenue - totalSpending - (totalSalesTransport - attributedSaleTransportTotal);
+    }, [totalRevenue, totalSpending, totalSalesTransport, attributedSaleTransportTotal]);
 
     // 9. Calculate PARTIAL EARNINGS (only from sold items)
     const partialEarnings = useMemo(() => {
@@ -370,7 +397,10 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             units: number;
             cogs: number;
             sales: number;
+            /** Sale delivery not attributed to a partner (legacy sales). */
             saleTransport: number;
+            /** Sale delivery paid by a partner (counted in partner spending). */
+            attributedSaleTransport: number;
             /** Inventory buy + purchase transport (same rules as Total Spending card), on purchase date */
             purchaseSpend: number;
         };
@@ -382,6 +412,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             cogs: 0,
             sales: 0,
             saleTransport: 0,
+            attributedSaleTransport: 0,
             purchaseSpend: 0
         });
 
@@ -390,7 +421,14 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
             if (!key || key.length < 8) return;
             const cur: Agg = byDay.get(key) || emptyAgg();
             cur.revenue += convertToTarget(sale.totalAmount || 0, sale.currency || 'CUP');
-            cur.saleTransport += convertToTarget(sale.transportCost || 0, sale.transportCurrency || 'CUP');
+            if (sale.transportCost > 0) {
+                const tVal = convertToTarget(sale.transportCost || 0, sale.transportCurrency || 'CUP');
+                if (sale.transportPaidByParticipantId) {
+                    cur.attributedSaleTransport += tVal;
+                } else {
+                    cur.saleTransport += tVal;
+                }
+            }
             cur.sales += 1;
             sale.items?.forEach(si => {
                 cur.units += si.quantity || 0;
@@ -454,7 +492,8 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 while (cursor <= endDay) {
                     const key = cursor.toISOString().slice(0, 10);
                     const agg = source.get(key) || emptyAgg();
-                    const dailyGlobalCost = agg.purchaseSpend + agg.saleTransport;
+                    const dailyGlobalCost =
+                        agg.purchaseSpend + agg.saleTransport + agg.attributedSaleTransport;
                     cum += agg.revenue;
                     cumGlobalCost += dailyGlobalCost;
                     series.push({
@@ -480,6 +519,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                     cur.cogs += agg.cogs;
                     cur.sales += agg.sales;
                     cur.saleTransport += agg.saleTransport;
+                    cur.attributedSaleTransport += agg.attributedSaleTransport;
                     cur.purchaseSpend += agg.purchaseSpend;
                     byWeek.set(wk, cur);
                 });
@@ -489,7 +529,8 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                 while (cursor <= wEnd) {
                     const key = cursor.toISOString().slice(0, 10);
                     const agg = byWeek.get(key) || emptyAgg();
-                    const dailyGlobalCost = agg.purchaseSpend + agg.saleTransport;
+                    const dailyGlobalCost =
+                        agg.purchaseSpend + agg.saleTransport + agg.attributedSaleTransport;
                     cum += agg.revenue;
                     cumGlobalCost += dailyGlobalCost;
                     series.push({

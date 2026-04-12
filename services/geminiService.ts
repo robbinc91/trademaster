@@ -68,6 +68,7 @@ function summarizeSale(s: Sale, productNames: Record<string, string>) {
     totalAmount: s.totalAmount,
     transportCost: s.transportCost,
     transportCurrency: s.transportCurrency,
+    transportPaidByParticipantId: s.transportPaidByParticipantId,
     address: s.address,
     customerPhone: s.customerPhone,
     lineItems: lineDetails,
@@ -176,6 +177,8 @@ export function buildStoreContextPayload(data: StoreData) {
       fifo:
         'Self-takes remove stock from oldest purchase batches first (same as Point of Sale allocation).',
       currencies: 'Amounts are stored in their native currencies; compare across currencies using exchangeRates when needed.',
+      saleTransportPayer:
+        'When transportPaidByParticipantId is set on a sale, that partner is treated as paying the sale delivery transport in partner spending / balance.',
     },
   };
 }

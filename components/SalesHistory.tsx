@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Sale, SaleItem, Item, Product } from '../types';
+import { Sale, SaleItem, Item, Product, Participant } from '../types';
 import { Calendar, Phone, Search, MapPin, Pencil, X, Trash2, ChevronDown, ChevronUp, Receipt, DollarSign, Truck, Filter, Package, RotateCcw, Plus, Minus } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CURRENCIES } from '../constants';
@@ -8,13 +8,14 @@ interface SalesHistoryProps {
     sales: Sale[];
     items: Item[];
     products: Product[];
+    participants: Participant[];
     editSale: (id: string, sale: Omit<Sale, 'id'>) => void;
     deleteSale: (id: string) => void;
 }
 
 type DateFilter = 'all' | 'today' | 'week' | 'month';
 
-export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, products, editSale, deleteSale }) => {
+export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, products, participants, editSale, deleteSale }) => {
     const { t } = useLanguage();
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState<DateFilter>('all');
@@ -27,6 +28,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
         address: '',
         transportCost: '',
         transportCurrency: 'USD',
+        transportPaidByParticipantId: '',
         totalAmount: '',
         currency: 'CUP',
         dateSold: ''
@@ -36,6 +38,9 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
     const [editItems, setEditItems] = useState<SaleItem[]>([]);
 
     // Helper to get product name from item
+    const getParticipantName = (participantId: string): string =>
+        participants.find(p => p.id === participantId)?.name || t('unknown');
+
     const getProductName = (itemId: string): string => {
         const item = items.find(i => i.id === itemId);
         if (item) {
@@ -139,6 +144,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
             address: sale.address || '',
             transportCost: sale.transportCost.toString(),
             transportCurrency: sale.transportCurrency || 'USD',
+            transportPaidByParticipantId: sale.transportPaidByParticipantId || '',
             totalAmount: sale.totalAmount.toString(),
             currency: sale.currency,
             dateSold: sale.dateSold
@@ -216,12 +222,21 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
             return;
         }
 
+        const tCost = parseFloat(editForm.transportCost) || 0;
+        if (tCost > 0 && !editForm.transportPaidByParticipantId) {
+            alert(t('alert_transport_payer_required'));
+            return;
+        }
+
         editSale(editingSale.id, {
             items: editItems,
+            products: editingSale.products || [],
             customerPhone: editForm.customerPhone,
             address: editForm.address,
-            transportCost: parseFloat(editForm.transportCost) || 0,
+            transportCost: tCost,
             transportCurrency: editForm.transportCurrency,
+            transportPaidByParticipantId:
+                tCost > 0 ? editForm.transportPaidByParticipantId : undefined,
             totalAmount: parseFloat(editForm.totalAmount),
             currency: editForm.currency,
             dateSold: editForm.dateSold
@@ -419,6 +434,11 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                                                         {sale.transportCost > 0 && (
                                                             <p className="text-xs text-slate-400">
                                                                 +{sale.transportCost} {sale.transportCurrency} {t('transport_fee')}
+                                                                {sale.transportPaidByParticipantId && (
+                                                                    <span className="block text-slate-500">
+                                                                        {t('transport_paid_by_short')}: {getParticipantName(sale.transportPaidByParticipantId)}
+                                                                    </span>
+                                                                )}
                                                             </p>
                                                         )}
                                                     </div>
@@ -490,11 +510,17 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
 
             {/* Edit Modal */}
             {editingSale && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl animate-slide-in-down">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-                            <h3 className="text-lg font-bold text-slate-800">{t('edit_sale_title')}</h3>
+                <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center sm:p-6">
+                    <div
+                        className="my-auto flex w-full max-w-2xl max-h-[min(calc(100dvh-2rem),90vh)] min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-slide-in-down"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="edit-sale-modal-title"
+                    >
+                        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4">
+                            <h3 id="edit-sale-modal-title" className="text-lg font-bold text-slate-800">{t('edit_sale_title')}</h3>
                             <button
+                                type="button"
                                 onClick={closeEditModal}
                                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                             >
@@ -502,7 +528,8 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                             </button>
                         </div>
 
-                        <form onSubmit={handleEditSubmit} className="p-4 grid grid-cols-2 gap-3">
+                        <form onSubmit={handleEditSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 grid grid-cols-2 gap-3">
                             {/* Sale Items (Editable) */}
                             <div className="bg-slate-50 p-3 rounded-lg col-span-2">
                                 <div className="flex items-center justify-between mb-2">
@@ -511,7 +538,7 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                                         {editItems.length} {editItems.length === 1 ? t('item_label') : t('items_count').replace('{count}', '')}
                                     </span>
                                 </div>
-                                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                                <div className="max-h-[min(40vh,14rem)] space-y-2 overflow-y-auto pr-2 sm:max-h-[min(35vh,12rem)]">
                                     {editItems.length > 0 ? editItems.map((item, idx) => (
                                         <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
                                             {/* Product Name */}
@@ -658,7 +685,15 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                                         step="0.01"
                                         name="transportCost"
                                         value={editForm.transportCost}
-                                        onChange={handleEditInputChange}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            setEditForm(prev => ({
+                                                ...prev,
+                                                transportCost: v,
+                                                transportPaidByParticipantId:
+                                                    (parseFloat(v) || 0) <= 0 ? '' : prev.transportPaidByParticipantId
+                                            }));
+                                        }}
                                         className="w-full border rounded-lg p-2"
                                     />
                                 </div>
@@ -675,6 +710,24 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                                 </div>
                             </div>
 
+                            {(parseFloat(editForm.transportCost) || 0) > 0 && (
+                                <div className="col-span-2">
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">{t('transport_paid_by_partner')}</label>
+                                    <select
+                                        name="transportPaidByParticipantId"
+                                        value={editForm.transportPaidByParticipantId}
+                                        onChange={handleEditInputChange}
+                                        className="w-full border rounded-lg p-2 bg-white"
+                                    >
+                                        <option value="">{t('select_participant')}</option>
+                                        {participants.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-slate-400 mt-1">{t('transport_payer_hint')}</p>
+                                </div>
+                            )}
+
                             {/* Date */}
                             <div className="col-span-2">
                                 <label className="block text-sm font-medium text-slate-700 mb-1">{t('date_sale')}</label>
@@ -689,9 +742,9 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                                     />
                                 </div>
                             </div>
+                            </div>
 
-                            {/* Actions */}
-                            <div className="col-span-2 flex justify-end gap-2 pt-2">
+                            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-4">
                                 <button
                                     type="button"
                                     onClick={closeEditModal}

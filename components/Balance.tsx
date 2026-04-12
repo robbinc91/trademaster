@@ -55,8 +55,17 @@ export const Balance: React.FC<BalanceProps> = ({ data, addAdjustment }) => {
             }
         });
 
+        (data.sales || []).forEach(sale => {
+            if (!sale.transportCost || sale.transportCost <= 0) return;
+            const payerId = sale.transportPaidByParticipantId;
+            if (!payerId) return;
+            if (!result[payerId]) result[payerId] = {};
+            const tc = sale.transportCurrency || 'N/A';
+            result[payerId][tc] = (result[payerId][tc] || 0) + sale.transportCost;
+        });
+
         return result;
-    }, [data.items]);
+    }, [data.items, data.sales]);
 
     // 2. Calculate total adjustments per participant per currency
     const adjustmentsByParticipantCurrency = useMemo(() => {

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Item, SaleItem, Product } from '../types';
+import { Item, SaleItem, Product, Participant } from '../types';
 import { ShoppingCart, Plus, Trash2, Package, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CURRENCIES } from '../constants';
@@ -7,6 +7,7 @@ import { CURRENCIES } from '../constants';
 interface SalesProps {
     items: Item[];
     products: Product[];
+    participants: Participant[];
     addSale: (sale: Omit<import('../types').Sale, 'id'>) => void;
 }
 
@@ -21,7 +22,7 @@ interface GroupedItem {
     avgPrice: number;
 }
 
-export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
+export const Sales: React.FC<SalesProps> = ({ items, products, participants, addSale }) => {
     const { t } = useLanguage();
 
     // Cart state
@@ -31,6 +32,7 @@ export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
     const [customerPhone, setCustomerPhone] = useState('');
     const [transportCost, setTransportCost] = useState(0);
     const [transportCurrency, setTransportCurrency] = useState<string>('USD');
+    const [transportPaidByParticipantId, setTransportPaidByParticipantId] = useState<string>('');
     const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0]);
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
     const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
@@ -158,22 +160,39 @@ export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
 
     const handleCompleteSale = () => {
         if (cart.length === 0) return;
+        if (transportCost > 0 && !transportPaidByParticipantId) {
+            alert(t('alert_transport_payer_required'));
+            return;
+        }
+
+        const productIds = new Set<string>();
+        cart.forEach(ci => {
+            const inv = items.find(i => i.id === ci.itemId);
+            if (inv?.productId) productIds.add(inv.productId);
+        });
+        const saleProducts = [...productIds]
+            .map(id => products.find(p => p.id === id))
+            .filter((p): p is Product => Boolean(p));
 
         addSale({
             dateSold: saleDate,
             items: cart,
+            products: saleProducts,
             totalAmount: cartTotal,
             currency: saleCurrency,
             address,
             customerPhone,
             transportCost,
-            transportCurrency
+            transportCurrency,
+            transportPaidByParticipantId:
+                transportCost > 0 ? transportPaidByParticipantId : undefined
         });
 
         setCart([]);
         setAddress('');
         setCustomerPhone('');
         setTransportCost(0);
+        setTransportPaidByParticipantId('');
         setSaleDate(new Date().toISOString().split('T')[0]);
     };
 
@@ -425,7 +444,11 @@ export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
                                     type="number"
                                     min="0"
                                     value={transportCost}
-                                    onChange={(e) => setTransportCost(parseFloat(e.target.value) || 0)}
+                                    onChange={(e) => {
+                                        const v = parseFloat(e.target.value) || 0;
+                                        setTransportCost(v);
+                                        if (v <= 0) setTransportPaidByParticipantId('');
+                                    }}
                                     className="w-full border rounded-lg px-3 py-2 text-sm"
                                 />
                             </div>
@@ -442,6 +465,25 @@ export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
                                 </select>
                             </div>
                         </div>
+
+                        {transportCost > 0 && (
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">
+                                    {t('transport_paid_by_partner')}
+                                </label>
+                                <select
+                                    value={transportPaidByParticipantId}
+                                    onChange={(e) => setTransportPaidByParticipantId(e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                                >
+                                    <option value="">{t('select_participant')}</option>
+                                    {participants.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-slate-400 mt-1">{t('transport_payer_hint')}</p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Total & Checkout */}
@@ -455,7 +497,10 @@ export const Sales: React.FC<SalesProps> = ({ items, products, addSale }) => {
 
                         <button
                             onClick={handleCompleteSale}
-                            disabled={cart.length === 0}
+                            disabled={
+                                cart.length === 0 ||
+                                (transportCost > 0 && !transportPaidByParticipantId)
+                            }
                             className="w-full py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {t('complete_sale')}

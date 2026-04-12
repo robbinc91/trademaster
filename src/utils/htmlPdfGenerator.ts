@@ -355,7 +355,7 @@ export const generateAdjustmentsHtml = (data: any, t: TranslateFn, lang: Languag
 /** Partner balances: investment in purchases + transport, adjustments, equal share (same logic as Balance view). */
 export const generatePartnerStatementHtml = (data: any, t: TranslateFn, lang: Language): string => {
     const loc = localeFor(lang);
-    const { items = [], adjustments = [], participants = [], rates = {} } = data;
+    const { items = [], sales = [], adjustments = [], participants = [], rates = {} } = data;
 
     const investmentByParticipant: Record<string, Record<string, number>> = {};
     items.forEach((item: any) => {
@@ -370,6 +370,16 @@ export const generatePartnerStatementHtml = (data: any, t: TranslateFn, lang: La
             investmentByParticipant[item.buyerId][tc] =
                 (investmentByParticipant[item.buyerId][tc] || 0) + item.transportCost;
         }
+    });
+
+    sales.forEach((sale: any) => {
+        if (!sale.transportCost || sale.transportCost <= 0) return;
+        const payerId = sale.transportPaidByParticipantId;
+        if (!payerId) return;
+        if (!investmentByParticipant[payerId]) investmentByParticipant[payerId] = {};
+        const tc = sale.transportCurrency || 'N/A';
+        investmentByParticipant[payerId][tc] =
+            (investmentByParticipant[payerId][tc] || 0) + sale.transportCost;
     });
 
     const paid: Record<string, Record<string, number>> = {};

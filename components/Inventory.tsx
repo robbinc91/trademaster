@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Item, Participant, Product, SelfTake, AddSelfTakeInput } from '../types';
 import { CURRENCIES } from '../constants';
 import { Plus, Package, Calendar, Pencil, X, Trash2, ChevronDown, ChevronUp, Layers, ArrowDownAZ, User, PackageMinus, RotateCcw } from 'lucide-react';
@@ -26,6 +26,7 @@ const emptyFormData = {
   sellPrice: '',
   sellCurrency: 'CUP',
   quantity: '',
+  initialQuantity: '',
   buyerId: '',
   transportCost: '',
   transportCurrency: 'USD',
@@ -78,6 +79,18 @@ export const Inventory: React.FC<InventoryProps> = ({
   const [formData, setFormData] = useState(emptyFormData);
   const [selfTakeForm, setSelfTakeForm] = useState(emptySelfTakeForm);
   const [showNewProductInput, setShowNewProductInput] = useState(false);
+
+  const purchaseFormRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!editingItem || !showForm) return;
+    const el = purchaseFormRef.current;
+    if (!el) return;
+    const frame = window.requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editingItem, showForm]);
 
   // Group items by productId (sorted by product name; batches inside each group by purchase date, newest first)
   const groupedItems = useMemo(() => {
@@ -220,6 +233,7 @@ export const Inventory: React.FC<InventoryProps> = ({
       sellPrice: item.sellPrice.toString(),
       sellCurrency: item.sellCurrency,
       quantity: item.quantity.toString(),
+      initialQuantity: initialAmount(item).toString(),
       buyerId: item.buyerId,
       transportCost: item.transportCost.toString(),
       transportCurrency: item.transportCurrency,
@@ -262,6 +276,27 @@ export const Inventory: React.FC<InventoryProps> = ({
       return;
     }
 
+    const remainingQty = parseFloat(formData.quantity);
+    if (!Number.isFinite(remainingQty) || remainingQty < 0) {
+      alert(t('alert_invalid_quantity'));
+      return;
+    }
+
+    let initialQty: number;
+    if (editingItem) {
+      initialQty = parseFloat(formData.initialQuantity);
+      if (!Number.isFinite(initialQty) || initialQty < 0) {
+        alert(t('alert_invalid_initial_quantity'));
+        return;
+      }
+      if (initialQty < remainingQty) {
+        alert(t('alert_initial_less_than_remaining'));
+        return;
+      }
+    } else {
+      initialQty = remainingQty;
+    }
+
     const itemData = {
       productId: productId,
       unit: formData.unit,
@@ -269,8 +304,8 @@ export const Inventory: React.FC<InventoryProps> = ({
       buyCurrency: formData.buyCurrency,
       sellPrice: parseFloat(formData.sellPrice),
       sellCurrency: formData.sellCurrency,
-      quantity: parseFloat(formData.quantity),
-      initialQuantity: editingItem ? editingItem.initialQuantity : parseFloat(formData.quantity),
+      quantity: remainingQty,
+      initialQuantity: initialQty,
       buyerId: formData.buyerId,
       transportCost: parseFloat(formData.transportCost) || 0,
       transportCurrency: formData.transportCurrency,
@@ -359,114 +394,234 @@ export const Inventory: React.FC<InventoryProps> = ({
       </div>
 
       {showForm && (
-        <div className="bg-white p-6 rounded-xl shadow-lg border border-blue-100 animate-slide-in-down">
+        <div
+          ref={purchaseFormRef}
+          className="bg-white p-6 rounded-xl shadow-lg border border-blue-100 animate-slide-in-down scroll-mt-4"
+        >
           <h3 className="text-lg font-semibold mb-4 text-slate-800">
             {editingItem ? t('edit_item_title') : t('register_purchase_title')}
           </h3>
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+            {/* Product */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">{t('select_product')}</label>
+                <select
+                  required
+                  name="productId"
+                  value={formData.productId}
+                  onChange={handleInputChange}
+                  className="w-full max-w-2xl border rounded-md p-2 bg-slate-50"
+                  disabled={showNewProductInput}
+                >
+                  <option value="">{t('choose_product_placeholder')}</option>
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  <option value="__new__">+ {t('create_product')}</option>
+                </select>
+              </div>
 
-            {/* Row 1: Product Selection */}
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t('select_product')}</label>
-              <select
-                required
-                name="productId"
-                value={formData.productId}
-                onChange={handleInputChange}
-                className="w-full border rounded-md p-2 bg-slate-50"
-                disabled={showNewProductInput}
-              >
-                <option value="">{t('choose_product_placeholder')}</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                <option value="__new__">+ {t('create_product')}</option>
-              </select>
+              {showNewProductInput && (
+                <div className="max-w-2xl">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('new_product')}</label>
+                  <div className="flex gap-2">
+                    <input
+                      required
+                      name="newProductName"
+                      value={formData.newProductName}
+                      onChange={handleInputChange}
+                      className="flex-1 border rounded-md p-2"
+                      placeholder={t('product_name_placeholder')}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewProductInput(false);
+                        setFormData(prev => ({ ...prev, productId: '' }));
+                      }}
+                      className="px-3 py-2 text-slate-500 hover:text-slate-700 shrink-0"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {showNewProductInput && (
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('new_product')}</label>
-                <div className="flex gap-2">
+            {/* Unit + quantities (aligned for edit and new) */}
+            <div
+              className={`rounded-lg border p-4 ${
+                editingItem ? 'border-blue-200 bg-blue-50/40' : 'border-slate-100 bg-slate-50/60'
+              }`}
+            >
+              {editingItem && (
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-3">
+                  {t('inventory_edit_quantities_section')}
+                </p>
+              )}
+              <div
+                className={`grid gap-4 ${
+                  editingItem ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'
+                }`}
+              >
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('measurement_unit')}</label>
                   <input
                     required
-                    name="newProductName"
-                    value={formData.newProductName}
+                    name="unit"
+                    value={formData.unit}
                     onChange={handleInputChange}
-                    className="flex-1 border rounded-md p-2"
-                    placeholder={t('product_name_placeholder')}
+                    className="w-full border rounded-md p-2"
+                    placeholder="pcs"
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowNewProductInput(false);
-                      setFormData(prev => ({ ...prev, productId: '' }));
-                    }}
-                    className="px-3 py-2 text-slate-500 hover:text-slate-700"
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {editingItem ? t('inventory_remaining_quantity_label') : t('quantity')}
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="quantity"
+                    value={formData.quantity}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2 bg-white"
+                  />
+                  {editingItem && (
+                    <p className="text-xs text-slate-500 mt-1.5">{t('inventory_remaining_quantity_hint')}</p>
+                  )}
+                </div>
+                {editingItem && (
+                  <div className="sm:col-span-2 lg:col-span-1">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      {t('inventory_initial_quantity_edit')}
+                    </label>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      step="any"
+                      name="initialQuantity"
+                      value={formData.initialQuantity}
+                      onChange={handleInputChange}
+                      className="w-full border rounded-md p-2 bg-white"
+                    />
+                    <p className="text-xs text-slate-500 mt-1.5">{t('inventory_initial_quantity_help')}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Buy / sell prices */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="flex gap-2 rounded-lg border border-slate-100 p-3 bg-white">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('buy_price')}</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    name="buyPrice"
+                    value={formData.buyPrice}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="w-24 shrink-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('currency')}</label>
+                  <select
+                    name="buyCurrency"
+                    value={formData.buyCurrency}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2 bg-slate-50"
                   >
-                    <X size={18} />
-                  </button>
+                    {CURRENCIES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t('measurement_unit')}</label>
-              <input required name="unit" value={formData.unit} onChange={handleInputChange} className="w-full border rounded-md p-2" placeholder="pcs" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t('quantity')}</label>
-              <input required type="number" min="0" step="any" name="quantity" value={formData.quantity} onChange={handleInputChange} className="w-full border rounded-md p-2" />
-            </div>
-
-            {/* Row 2: Buy Prices & Currency */}
-            <div className="flex gap-2 col-span-2">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('buy_price')}</label>
-                <input required type="number" min="0" step="0.01" name="buyPrice" value={formData.buyPrice} onChange={handleInputChange} className="w-full border rounded-md p-2" placeholder="0.00" />
+              <div className="flex gap-2 rounded-lg border border-slate-100 p-3 bg-white">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('sell_price')}</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    name="sellPrice"
+                    value={formData.sellPrice}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="w-24 shrink-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('currency')}</label>
+                  <select
+                    name="sellCurrency"
+                    value={formData.sellCurrency}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2 bg-slate-50"
+                  >
+                    {CURRENCIES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="w-24">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('currency')}</label>
-                <select name="buyCurrency" value={formData.buyCurrency} onChange={handleInputChange} className="w-full border rounded-md p-2 bg-slate-50">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </div>
+
+            {/* Transport + buyer + date */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="flex gap-2 rounded-lg border border-slate-100 p-3 bg-white">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('transport_cost')}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    name="transportCost"
+                    value={formData.transportCost}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2"
+                  />
+                </div>
+                <div className="w-28 shrink-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{t('transport_currency')}</label>
+                  <select
+                    name="transportCurrency"
+                    value={formData.transportCurrency}
+                    onChange={handleInputChange}
+                    className="w-full border rounded-md p-2 bg-slate-50"
+                  >
+                    {CURRENCIES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-100 p-3 bg-white">
+                <label className="block text-sm font-medium text-slate-700 mb-1">{t('buyer')}</label>
+                <select
+                  required
+                  name="buyerId"
+                  value={formData.buyerId}
+                  onChange={handleInputChange}
+                  className="w-full border rounded-md p-2 bg-slate-50"
+                >
+                  <option value="">{t('select_participant')}</option>
+                  {participants.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
                 </select>
               </div>
             </div>
 
-            {/* Row 3: Sell Prices & Currency */}
-            <div className="flex gap-2 col-span-2">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('sell_price')}</label>
-                <input required type="number" min="0" step="0.01" name="sellPrice" value={formData.sellPrice} onChange={handleInputChange} className="w-full border rounded-md p-2" placeholder="0.00" />
-              </div>
-              <div className="w-24">
-                <label className="block text-sm font-medium text-slate-700 mb-1">{t('currency')}</label>
-                <select name="sellCurrency" value={formData.sellCurrency} onChange={handleInputChange} className="w-full border rounded-md p-2 bg-slate-50">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Row 4: Logistics & Buyer */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t('transport_cost')}</label>
-              <input type="number" min="0" step="0.01" name="transportCost" value={formData.transportCost} onChange={handleInputChange} className="w-full border rounded-md p-2" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Trans. Currency</label>
-              <select name="transportCurrency" value={formData.transportCurrency} onChange={handleInputChange} className="w-full border rounded-md p-2">
-                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t('buyer')}</label>
-              <select required name="buyerId" value={formData.buyerId} onChange={handleInputChange} className="w-full border rounded-md p-2 bg-slate-50">
-                <option value="">{t('select_participant')}</option>
-                {participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-
-            {/* Row 5: Date */}
-            <div className="col-span-2">
+            <div className="max-w-md">
               <label className="block text-sm font-medium text-slate-700 mb-1">{t('date_purchase')}</label>
               <div className="relative">
                 <Calendar size={16} className="absolute left-3 top-3 text-slate-400" />
@@ -475,12 +630,12 @@ export const Inventory: React.FC<InventoryProps> = ({
                   name="dateAdded"
                   value={formData.dateAdded}
                   onChange={handleInputChange}
-                  className="w-full border rounded-md pl-10 p-2"
+                  className="w-full border rounded-md pl-10 p-2 bg-white"
                 />
               </div>
             </div>
 
-            <div className="col-span-full mt-4 flex justify-end gap-3">
+            <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
               {editingItem && (
                 <button
                   type="button"
@@ -490,7 +645,10 @@ export const Inventory: React.FC<InventoryProps> = ({
                   {t('cancel')}
                 </button>
               )}
-              <button type="submit" className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors">
+              <button
+                type="submit"
+                className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors"
+              >
                 {editingItem ? t('save_changes') : t('register_item_btn')}
               </button>
             </div>

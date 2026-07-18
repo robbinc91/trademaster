@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StoreData } from '../types';
-import { analyzeStoreData } from '../services/geminiService';
+import { analyzeStoreData, getAiProviderLabel } from '../services/geminiService';
 import { Sparkles, Send, Loader2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -25,6 +25,7 @@ export const AIAnalyst: React.FC<AIAnalystProps> = ({ data }) => {
   const [query, setQuery] = useState('');
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
+  const providerLabel = getAiProviderLabel();
 
   const runAnalysis = async (text: string) => {
     const q = text.trim();
@@ -35,6 +36,8 @@ export const AIAnalyst: React.FC<AIAnalystProps> = ({ data }) => {
       const result = await analyzeStoreData(data, q, language);
       if (result === 'MISSING_API_KEY') {
         setResponse(t('ai_error_missing_key'));
+      } else if (result === 'MISSING_BASE_URL') {
+        setResponse(t('ai_error_missing_base_url'));
       } else if (result.startsWith('API_ERROR:')) {
         console.error(result.slice('API_ERROR:'.length));
         setResponse(t('ai_error_failed'));
@@ -70,7 +73,7 @@ export const AIAnalyst: React.FC<AIAnalystProps> = ({ data }) => {
         <p className="text-slate-500 mt-2">
           {t('ai_desc')}
           <br />
-          {t('powered_by')}
+          {t('powered_by', { provider: providerLabel })}
         </p>
       </div>
 

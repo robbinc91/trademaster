@@ -121,3 +121,120 @@
 .dark main .hover\:bg-slate-100:hover {
     background-color: rgb(51 65 85) !important;
 }
+
+/* Pastel alert / chip surfaces → dark equivalents so remapped light text stays readable */
+.dark main .bg-amber-50 {
+    background-color: rgb(69 26 3 / 0.55) !important;
+}
+
+.dark main .bg-amber-100 {
+    background-color: rgb(120 53 15 / 0.55) !important;
+}
+
+.dark main .bg-red-50 {
+    background-color: rgb(69 10 10 / 0.55) !important;
+}
+
+.dark main .bg-red-100 {
+    background-color: rgb(127 29 29 / 0.55) !important;
+}
+
+.dark main .bg-blue-100 {
+    background-color: rgb(30 58 138 / 0.55) !important;
+}
+
+.dark main .bg-emerald-100 {
+    background-color: rgb(6 78 59 / 0.55) !important;
+}
+
+.dark main .bg-slate-100 {
+    background-color: rgb(51 65 85) !important;
+}
+
+.dark main .border-amber-100,
+.dark main .border-amber-200 {
+    border-color: rgb(146 64 14 / 0.55) !important;
+}
+
+.dark main .border-red-100,
+.dark main .border-red-200 {
+    border-color: rgb(153 27 27 / 0.55) !important;
+}
+
+.dark main .text-amber-800,
+.dark main .text-amber-800\/80,
+.dark main .text-amber-900,
+.dark main .text-amber-950 {
+    color: rgb(253 230 138) !important;
+}
+
+.dark main .text-red-700,
+.dark main .text-red-800,
+.dark main .text-red-800\/80,
+.dark main .text-red-900,
+.dark main .text-red-950 {
+    color: rgb(254 202 202) !important;
+}
+
+.dark main .text-blue-700,
+.dark main .text-blue-800,
+.dark main .text-blue-900,
+.dark main .text-blue-950 {
+    color: rgb(191 219 254) !important;
+}
+
+.dark main .text-emerald-700,
+.dark main .text-emerald-800,
+.dark main .text-emerald-800\/80,
+.dark main .text-emerald-800\/70,
+.dark main .text-emerald-900,
+.dark main .text-emerald-900\/70,
+.dark main .text-emerald-950 {
+    color: rgb(167 243 208) !important;
+}
+
+.dark main .text-purple-700,
+.dark main .text-purple-800,
+.dark main .text-purple-950 {
+    color: rgb(216 180 254) !important;
+}
+
+.dark main .text-amber-600,
+.dark main .text-amber-700 {
+    color: rgb(253 230 138) !important;
+}
+
+.dark main .bg-blue-50 {
+    background-color: rgb(23 37 84 / 0.75) !important;
+}
+
+.dark main .bg-emerald-50 {
+    background-color: rgb(2 44 34 / 0.75) !important;
+}
+
+.dark main .bg-purple-50 {
+    background-color: rgb(59 7 100 / 0.75) !important;
+}
+
+.dark main .bg-teal-50 {
+    background-color: rgb(4 47 46 / 0.75) !important;
+}
+
+.dark main .border-blue-200,
+.dark main .border-emerald-200,
+.dark main .border-emerald-100,
+.dark main .border-purple-200 {
+    border-color: rgb(71 85 105 / 0.8) !important;
+}
+
+.dark main .text-slate-900 {
+    color: rgb(241 245 249) !important;
+}
+
+.dark main .bg-amber-200 {
+    background-color: rgb(146 64 14 / 0.7) !important;
+}
+
+.dark main .bg-red-200 {
+    background-color: rgb(153 27 27 / 0.7) !important;
+}

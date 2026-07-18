@@ -1,21 +1,29 @@
 import React, { useState, useMemo } from 'react';
-import { Sale, SaleItem, Item, Product, Participant } from '../types';
+import { Sale, SaleItem, Item, Product, Participant, MoneyRetirement, AddMoneyRetirementInput } from '../types';
 import { Calendar, Phone, Search, MapPin, Pencil, X, Trash2, ChevronDown, ChevronUp, Receipt, DollarSign, Truck, Filter, Package, RotateCcw, Plus, Minus } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CURRENCIES } from '../constants';
+import { AvailableCash } from './AvailableCash';
 
 interface SalesHistoryProps {
     sales: Sale[];
     items: Item[];
     products: Product[];
     participants: Participant[];
+    moneyRetirements: MoneyRetirement[];
+    addMoneyRetirement: (input: AddMoneyRetirementInput) => void;
+    deleteMoneyRetirement: (id: string) => void;
     editSale: (id: string, sale: Omit<Sale, 'id'>) => void;
     deleteSale: (id: string) => void;
 }
 
 type DateFilter = 'all' | 'today' | 'week' | 'month';
 
-export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, products, participants, editSale, deleteSale }) => {
+export const SalesHistory: React.FC<SalesHistoryProps> = ({
+    sales, items, products, participants,
+    moneyRetirements, addMoneyRetirement, deleteMoneyRetirement,
+    editSale, deleteSale
+}) => {
     const { t } = useLanguage();
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState<DateFilter>('all');
@@ -320,43 +328,52 @@ export const SalesHistory: React.FC<SalesHistoryProps> = ({ sales, items, produc
                 </div>
             </div>
 
+            <AvailableCash
+                sales={sales}
+                moneyRetirements={moneyRetirements}
+                addMoneyRetirement={addMoneyRetirement}
+                deleteMoneyRetirement={deleteMoneyRetirement}
+            />
+
             {/* Summary Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl border border-blue-200">
+                <div className="bg-blue-50 dark:bg-blue-950/80 p-4 rounded-xl border border-blue-200 dark:border-blue-800">
                     <div className="flex items-center gap-2 mb-1">
-                        <Receipt size={16} className="text-blue-600" />
-                        <span className="text-xs font-medium text-blue-600">{t('total_sales')}</span>
+                        <Receipt size={16} className="text-blue-700 dark:text-blue-300" />
+                        <span className="text-xs font-medium text-blue-700 dark:text-blue-300">{t('total_sales')}</span>
                     </div>
-                    <p className="text-2xl font-bold text-blue-800">{summaryStats.totalSales}</p>
+                    <p className="text-2xl font-bold text-blue-950 dark:text-blue-50">{summaryStats.totalSales}</p>
                 </div>
 
-                <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-4 rounded-xl border border-emerald-200">
+                <div className="bg-emerald-50 dark:bg-emerald-950/80 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800">
                     <div className="flex items-center gap-2 mb-1">
-                        <DollarSign size={16} className="text-emerald-600" />
-                        <span className="text-xs font-medium text-emerald-600">{t('total_revenue')}</span>
+                        <DollarSign size={16} className="text-emerald-700 dark:text-emerald-300" />
+                        <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{t('total_revenue')}</span>
                     </div>
-                    <div className="text-lg font-bold text-emerald-800">
+                    <div className="text-lg font-bold text-emerald-950 dark:text-emerald-50">
                         {Object.entries(summaryStats.revenueByCurrency).map(([currency, amount]) => (
                             <div key={currency}>{amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {currency}</div>
                         ))}
-                        {Object.keys(summaryStats.revenueByCurrency).length === 0 && <span className="text-slate-400">-</span>}
+                        {Object.keys(summaryStats.revenueByCurrency).length === 0 && (
+                            <span className="text-slate-500 dark:text-slate-400">-</span>
+                        )}
                     </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl border border-purple-200">
+                <div className="bg-purple-50 dark:bg-purple-950/80 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
                     <div className="flex items-center gap-2 mb-1">
-                        <Package size={16} className="text-purple-600" />
-                        <span className="text-xs font-medium text-purple-600">{t('total_qty_sold')}</span>
+                        <Package size={16} className="text-purple-700 dark:text-purple-300" />
+                        <span className="text-xs font-medium text-purple-700 dark:text-purple-300">{t('total_qty_sold')}</span>
                     </div>
-                    <p className="text-2xl font-bold text-purple-800">{summaryStats.totalItems}</p>
+                    <p className="text-2xl font-bold text-purple-950 dark:text-purple-50">{summaryStats.totalItems}</p>
                 </div>
 
-                <div className="bg-gradient-to-br from-amber-50 to-amber-100 p-4 rounded-xl border border-amber-200">
+                <div className="bg-amber-50 dark:bg-amber-950/80 p-4 rounded-xl border border-amber-200 dark:border-amber-800">
                     <div className="flex items-center gap-2 mb-1">
-                        <Truck size={16} className="text-amber-600" />
-                        <span className="text-xs font-medium text-amber-600">{t('transport_fee')}</span>
+                        <Truck size={16} className="text-amber-800 dark:text-amber-300" />
+                        <span className="text-xs font-medium text-amber-800 dark:text-amber-300">{t('transport_fee')}</span>
                     </div>
-                    <p className="text-lg font-bold text-amber-800">
+                    <p className="text-lg font-bold text-amber-950 dark:text-amber-50">
                         {filteredSales.filter(s => s.transportCost > 0).length} {t('with_transport') || 'w/ transport'}
                     </p>
                 </div>

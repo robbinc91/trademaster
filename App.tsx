@@ -12,7 +12,7 @@ import { SalesHistory } from './components/SalesHistory';
 import { ExchangeRates } from './components/ExchangeRates';
 import { AIAnalyst } from './components/AIAnalyst';
 import { TabType, TABS, TAB_CONFIG } from './constants';
-import { StoreData, Participant, Product, Item, Sale, ConversionRates, Adjustment, SelfTake, SelfTakeLine, AddSelfTakeInput } from './types';
+import { StoreData, Participant, Product, Item, Sale, ConversionRates, Adjustment, SelfTake, SelfTakeLine, AddSelfTakeInput, AddMoneyRetirementInput } from './types';
 import { LanguageProvider, Language, useLanguage } from './contexts/LanguageContext';
 import { jsonStorage } from './src/utils/jsonStorage';
 import { translations } from './translations';
@@ -186,6 +186,7 @@ const INITIAL_DATA: StoreData = {
   items: [],
   sales: [],
   selfTakes: [],
+  moneyRetirements: [],
   rates: { USD: 320, EUR: 335 },
   adjustments: [],
   language: 'es'
@@ -336,6 +337,7 @@ const AppContent: React.FC = () => {
           products: migratedProducts,
           items: migratedItems,
           selfTakes: loadedData.selfTakes || [],
+          moneyRetirements: loadedData.moneyRetirements || [],
           rates: loadedData.rates || INITIAL_DATA.rates,
           adjustments: loadedData.adjustments || [],
           language: (loadedData.language === 'es' || loadedData.language === 'en') ? loadedData.language : 'en'
@@ -369,6 +371,7 @@ const AppContent: React.FC = () => {
           ...INITIAL_DATA,
           ...data,
           selfTakes: data.selfTakes || [],
+          moneyRetirements: data.moneyRetirements || [],
           rates: data.rates || INITIAL_DATA.rates,
           adjustments: data.adjustments || [],
           language: (data.language === 'es' || data.language === 'en') ? data.language : 'en'
@@ -618,6 +621,30 @@ const AppContent: React.FC = () => {
     }));
   };
 
+  const addMoneyRetirement = (input: AddMoneyRetirementInput) => {
+    setStoreData(prev => ({
+      ...prev,
+      moneyRetirements: [
+        ...(prev.moneyRetirements || []),
+        {
+          id: crypto.randomUUID(),
+          date: input.date,
+          currency: input.currency,
+          mode: input.mode,
+          amount: input.mode === 'partial' ? input.amount : undefined,
+          note: input.note
+        }
+      ]
+    }));
+  };
+
+  const deleteMoneyRetirement = (id: string) => {
+    setStoreData(prev => ({
+      ...prev,
+      moneyRetirements: prev.moneyRetirements.filter(r => r.id !== id)
+    }));
+  };
+
   const updateRates = (newRates: ConversionRates) => {
     setStoreData(prev => ({ ...prev, rates: newRates }));
   };
@@ -637,7 +664,14 @@ const AppContent: React.FC = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case TABS.DASHBOARD: return <Dashboard data={storeData} />;
+      case TABS.DASHBOARD: return (
+        <Dashboard
+          data={storeData}
+          addMoneyRetirement={addMoneyRetirement}
+          deleteMoneyRetirement={deleteMoneyRetirement}
+          setActiveTab={setActiveTab}
+        />
+      );
       case TABS.STATISTICS: return <Statistics data={storeData} />;
       case TABS.BALANCE: return <Balance data={storeData} addAdjustment={addAdjustment} />;
       case TABS.PARTICIPANTS: return <Participants participants={storeData.participants} addParticipant={addParticipant} removeParticipant={removeParticipant} />;
@@ -670,6 +704,9 @@ const AppContent: React.FC = () => {
           products={storeData.products || []}
           items={storeData.items}
           participants={storeData.participants}
+          moneyRetirements={storeData.moneyRetirements || []}
+          addMoneyRetirement={addMoneyRetirement}
+          deleteMoneyRetirement={deleteMoneyRetirement}
           editSale={editSale}
           deleteSale={deleteSale}
         />

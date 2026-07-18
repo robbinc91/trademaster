@@ -1,27 +1,41 @@
-import React, { useMemo } from 'react';
-import { StoreData, CurrencyTotal } from '../types';
-import { TrendingUp, Truck, Wallet, PackageOpen, Users, Sparkles } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { StoreData, CurrencyTotal, AddMoneyRetirementInput } from '../types';
+import {
+  TrendingUp,
+  Wallet,
+  PackageOpen,
+  Users,
+  Receipt,
+  Scale,
+  Package,
+  ArrowUpRight,
+  ArrowDownRight
+} from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { AvailableCash } from './AvailableCash';
+import { TabType, TABS } from '../constants';
+import {
+  computeNetProfit,
+  computeInventoryValueByCurrency,
+  computePartnerBalanceTeasers
+} from '../src/utils/financeStats';
 
 interface DashboardProps {
   data: StoreData;
+  addMoneyRetirement: (input: AddMoneyRetirementInput) => void;
+  deleteMoneyRetirement: (id: string) => void;
+  setActiveTab?: (tab: TabType) => void;
 }
 
-// Currency colors for chart
-const getCurrencyColor = (currency: string) => {
-  const colors: Record<string, string> = {
-    'USD': '#3b82f6',
-    'EUR': '#10b981',
-    'CUP': '#f59e0b',
-    'MLC': '#8b5cf6'
-  };
-  return colors[currency] || '#6b7280';
-};
-
-export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  data,
+  addMoneyRetirement,
+  deleteMoneyRetirement,
+  setActiveTab
+}) => {
   const { t } = useLanguage();
+  const [profitCurrency, setProfitCurrency] = useState<'USD' | 'CUP'>('USD');
 
-  // Sales revenue by currency
   const salesRevenue = useMemo(() => {
     const revenue: CurrencyTotal = {};
     data.sales.forEach(sale => {
@@ -31,47 +45,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
     return revenue;
   }, [data.sales]);
 
-  // Sale delivery / transport costs by currency
-  const salesTransport = useMemo(() => {
-    const cost: CurrencyTotal = {};
-    data.sales.forEach(sale => {
-      const transportCurrency = sale.transportCurrency || 'N/A';
-      cost[transportCurrency] = (cost[transportCurrency] || 0) + (sale.transportCost || 0);
-    });
-    return cost;
-  }, [data.sales]);
+  const netProfit = useMemo(
+    () => computeNetProfit(data, profitCurrency),
+    [data, profitCurrency]
+  );
 
-  const currencyFlowRows = useMemo(() => {
-    const keys = new Set([...Object.keys(salesRevenue), ...Object.keys(salesTransport)]);
-    return Array.from(keys)
+  const inventoryValue = useMemo(
+    () => computeInventoryValueByCurrency(data),
+    [data.items]
+  );
+
+  const inventoryValueRows = useMemo(() => {
+    const currencies = new Set([
+      ...Object.keys(inventoryValue.atCost),
+      ...Object.keys(inventoryValue.atSell)
+    ]);
+    return Array.from(currencies)
       .map(currency => ({
         currency,
-        revenue: salesRevenue[currency] || 0,
-        logistics: salesTransport[currency] || 0
+        atCost: inventoryValue.atCost[currency] || 0,
+        atSell: inventoryValue.atSell[currency] || 0
       }))
-      .filter(row => row.revenue > 0 || row.logistics > 0)
-      .sort((a, b) => b.revenue - a.revenue || b.logistics - a.logistics);
-  }, [salesRevenue, salesTransport]);
+      .filter(row => row.atCost > 0 || row.atSell > 0)
+      .sort((a, b) => b.atSell + b.atCost - (a.atSell + a.atCost));
+  }, [inventoryValue]);
 
-  const flowMaxRevenue = useMemo(
-    () => currencyFlowRows.reduce((m, r) => Math.max(m, r.revenue), 0),
-    [currencyFlowRows]
+  const partnerTeasers = useMemo(
+    () => computePartnerBalanceTeasers(data).slice(0, 6),
+    [data]
   );
-  const flowMaxLogistics = useMemo(
-    () => currencyFlowRows.reduce((m, r) => Math.max(m, r.logistics), 0),
-    [currencyFlowRows]
-  );
+
+  const recentSales = useMemo(() => {
+    return [...(data.sales || [])]
+      .sort((a, b) => {
+        const d = (b.dateSold || '').localeCompare(a.dateSold || '');
+        if (d !== 0) return d;
+        return (b.id || '').localeCompare(a.id || '');
+      })
+      .slice(0, 5);
+  }, [data.sales]);
 
   return (
     <div className="p-8 space-y-8 animate-fade-in">
       <h2 className="text-3xl font-bold text-slate-800">{t('business_overview')}</h2>
 
-      {/* High Level Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-slate-500 font-medium">{t('total_participants')}</h3>
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><UsersIcon size={20} /></div>
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Users size={20} /></div>
           </div>
           <p className="text-3xl font-bold text-slate-800">{data.participants.length}</p>
         </div>
@@ -100,122 +122,200 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
         </div>
       </div>
 
-      {/* Revenue + logistics: single insight panel (replaces two large side-by-side cards) */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-gradient-to-br from-white via-slate-50/40 to-indigo-50/50 shadow-sm">
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.35]"
-          style={{
-            backgroundImage:
-              'radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.12), transparent 45%), radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.1), transparent 40%)'
-          }}
-        />
-        <div className="relative px-6 py-5 border-b border-slate-200/60 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-600/25">
-              <Sparkles size={22} strokeWidth={2} aria-hidden />
+      <AvailableCash
+        sales={data.sales}
+        moneyRetirements={data.moneyRetirements || []}
+        addMoneyRetirement={addMoneyRetirement}
+        deleteMoneyRetirement={deleteMoneyRetirement}
+        compact
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Net profit snapshot */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex items-start gap-2">
+              <div className={`p-2 rounded-lg ${netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                <TrendingUp size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">{t('dashboard_net_profit_title')}</h3>
+                <p className="text-sm text-slate-500">{t('dashboard_net_profit_desc')}</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900 tracking-tight">{t('dashboard_flow_title')}</h3>
-              <p className="text-sm text-slate-500 mt-0.5 max-w-xl">{t('dashboard_flow_subtitle')}</p>
-            </div>
+            <select
+              value={profitCurrency}
+              onChange={e => setProfitCurrency(e.target.value as 'USD' | 'CUP')}
+              className="border rounded-lg px-2 py-1.5 text-sm bg-slate-50 text-slate-700"
+              aria-label={t('profit_currency')}
+            >
+              <option value="USD">USD</option>
+              <option value="CUP">CUP</option>
+            </select>
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-600">
-            <span className="inline-flex items-center gap-2">
-              <span className="h-2 w-6 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 shadow-sm" />
-              {t('dashboard_flow_legend_revenue')}
-            </span>
-            <span className="inline-flex items-center gap-2">
-              <span className="h-2 w-6 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 shadow-sm" />
-              {t('dashboard_flow_legend_logistics')}
-            </span>
-          </div>
+          <p className={`text-3xl font-bold tabular-nums ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+            {netProfit.toLocaleString(undefined, { maximumFractionDigits: 2 })} {profitCurrency}
+          </p>
+          {setActiveTab && (
+            <button
+              type="button"
+              onClick={() => setActiveTab(TABS.STATISTICS)}
+              className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-800"
+            >
+              {t('dashboard_open_statistics')}
+            </button>
+          )}
         </div>
 
-        <div className="relative p-6">
-          {currencyFlowRows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-14 text-center text-slate-400">
-              <div className="flex gap-3 mb-4">
-                <TrendingUp size={40} className="opacity-25" />
-                <Truck size={40} className="opacity-25" />
-              </div>
-              <p className="max-w-md text-slate-500">{t('dashboard_flow_empty')}</p>
+        {/* Inventory value */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex items-start gap-2 mb-4">
+            <div className="p-2 rounded-lg bg-sky-50 text-sky-600">
+              <Package size={20} />
             </div>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">{t('dashboard_inventory_value_title')}</h3>
+              <p className="text-sm text-slate-500">{t('dashboard_inventory_value_desc')}</p>
+            </div>
+          </div>
+          {inventoryValueRows.length === 0 ? (
+            <p className="text-sm text-slate-400 py-4">{t('dashboard_inventory_value_empty')}</p>
           ) : (
-            <ul className="space-y-6">
-              {currencyFlowRows.map(row => {
-                const color = getCurrencyColor(row.currency);
-                const revPct = flowMaxRevenue > 0 ? (row.revenue / flowMaxRevenue) * 100 : 0;
-                const logPct = flowMaxLogistics > 0 ? (row.logistics / flowMaxLogistics) * 100 : 0;
-                const share =
-                  row.revenue > 0 && row.logistics > 0
-                    ? t('dashboard_flow_logistics_share', { pct: ((row.logistics / row.revenue) * 100).toFixed(1) })
-                    : null;
-
-                return (
-                  <li key={row.currency} className="group">
-                    <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                      <div className="flex items-center gap-3 shrink-0 lg:w-36">
-                        <div
-                          className="flex h-11 w-11 items-center justify-center rounded-xl text-xs font-bold text-white shadow-md ring-2 ring-white/80"
-                          style={{ backgroundColor: color }}
-                        >
-                          {row.currency.length > 4 ? row.currency.slice(0, 3) : row.currency}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{row.currency}</p>
-                          {share && (
-                            <p className="text-xs text-violet-600 font-medium mt-0.5">{share}</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-w-0 space-y-2.5">
-                        <div>
-                          <div className="flex justify-between text-xs text-slate-500 mb-1">
-                            <span>{t('dashboard_flow_legend_revenue')}</span>
-                            <span className="font-semibold text-slate-700 tabular-nums">
-                              {row.revenue.toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="h-3 rounded-full bg-slate-200/80 overflow-hidden ring-1 ring-slate-200/60">
-                            <div
-                              className="h-full rounded-full transition-all duration-500 ease-out group-hover:brightness-110"
-                              style={{
-                                width: `${revPct}%`,
-                                background: `linear-gradient(90deg, ${color}, ${color}cc)`
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex justify-between text-xs text-slate-500 mb-1">
-                            <span className="inline-flex items-center gap-1">
-                              <Truck size={12} className="text-violet-500 shrink-0" />
-                              {t('dashboard_flow_legend_logistics')}
-                            </span>
-                            <span className="font-semibold text-slate-700 tabular-nums">
-                              {row.logistics > 0 ? row.logistics.toLocaleString() : '—'}
-                            </span>
-                          </div>
-                          <div className="h-2 rounded-full bg-slate-200/80 overflow-hidden ring-1 ring-slate-200/60">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-500 ease-out opacity-90 group-hover:opacity-100"
-                              style={{ width: `${logPct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
+            <ul className="space-y-3">
+              {inventoryValueRows.map(row => (
+                <li
+                  key={row.currency}
+                  className="py-2 border-b border-slate-100 last:border-0"
+                >
+                  <p className="text-sm font-semibold text-slate-700 mb-1.5">{row.currency}</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-4">
+                    <div className="flex justify-between sm:block gap-4">
+                      <span className="text-xs text-slate-500">{t('dashboard_inventory_at_cost')}</span>
+                      <p className="text-sm font-bold text-slate-800 tabular-nums">
+                        {row.atCost > 0
+                          ? row.atCost.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                          : '—'}
+                      </p>
                     </div>
-                  </li>
-                );
-              })}
+                    <div className="flex justify-between sm:block gap-4 sm:text-right">
+                      <span className="text-xs text-slate-500">{t('dashboard_inventory_at_sell')}</span>
+                      <p className="text-sm font-bold text-emerald-700 tabular-nums">
+                        {row.atSell > 0
+                          ? row.atSell.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                          : '—'}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              ))}
             </ul>
+          )}
+          {setActiveTab && (
+            <button
+              type="button"
+              onClick={() => setActiveTab(TABS.INVENTORY)}
+              className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-800"
+            >
+              {t('dashboard_open_inventory')}
+            </button>
+          )}
+        </div>
+
+        {/* Partner balance teaser */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex items-start gap-2 mb-4">
+            <div className="p-2 rounded-lg bg-cyan-50 text-cyan-600">
+              <Scale size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">{t('dashboard_partner_balance_title')}</h3>
+              <p className="text-sm text-slate-500">{t('dashboard_partner_balance_desc')}</p>
+            </div>
+          </div>
+          {partnerTeasers.length === 0 ? (
+            <p className="text-sm text-slate-400 py-4">{t('dashboard_partner_balance_empty')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {partnerTeasers.map(row => (
+                <li
+                  key={`${row.participantId}-${row.currency}`}
+                  className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 last:border-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{row.name}</p>
+                    <p className="text-xs text-slate-500">{row.currency}</p>
+                  </div>
+                  <span
+                    className={`inline-flex items-center gap-1 shrink-0 text-xs font-semibold px-2 py-1 rounded-full ${
+                      row.status === 'receives'
+                        ? 'bg-emerald-100 text-emerald-900 dark:text-emerald-100'
+                        : 'bg-red-100 text-red-900 dark:text-red-100'
+                    }`}
+                  >
+                    {row.status === 'receives' ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                    {row.status === 'receives' ? t('receives') : t('owes')}{' '}
+                    {Math.abs(row.difference).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {setActiveTab && (
+            <button
+              type="button"
+              onClick={() => setActiveTab(TABS.BALANCE)}
+              className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-800"
+            >
+              {t('dashboard_open_balance')}
+            </button>
+          )}
+        </div>
+
+        {/* Recent sales */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex items-start gap-2 mb-4">
+            <div className="p-2 rounded-lg bg-violet-50 text-violet-600">
+              <Receipt size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">{t('dashboard_recent_sales_title')}</h3>
+              <p className="text-sm text-slate-500">{t('dashboard_recent_sales_desc')}</p>
+            </div>
+          </div>
+          {recentSales.length === 0 ? (
+            <p className="text-sm text-slate-400 py-4">{t('dashboard_recent_sales_empty')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {recentSales.map(sale => (
+                <li
+                  key={sale.id}
+                  className="flex items-center justify-between gap-3 py-2 border-b border-slate-100 last:border-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800">{sale.dateSold}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {sale.customerPhone || sale.address || t('pdf_walk_in')}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-slate-800 tabular-nums">
+                    {(sale.totalAmount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}{' '}
+                    {sale.currency}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {setActiveTab && (
+            <button
+              type="button"
+              onClick={() => setActiveTab(TABS.SALES_HISTORY)}
+              className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-800"
+            >
+              {t('dashboard_open_sales_history')}
+            </button>
           )}
         </div>
       </div>
     </div>
   );
 };
-
-// Helper icon
-const UsersIcon = (props: any) => <Users {...props} />;

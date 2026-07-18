@@ -4,7 +4,7 @@ import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, LabelList,
     Line, Area, CartesianGrid, ComposedChart
 } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Filter, Users, Package, PackageCheck, ArrowUpRight, ArrowDownRight, ShoppingCart, Award, AlertTriangle, BarChart3, LineChart as LineChartIcon } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Filter, Users, Package, PackageCheck, ArrowUpRight, ArrowDownRight, ShoppingCart, Award, AlertTriangle, BarChart3, LineChart as LineChartIcon, Scale, Grid3x3 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface StatisticsProps {
@@ -16,6 +16,18 @@ const PIE_COLORS = [
     '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
     '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
 ];
+
+/** Absolute remaining units that count as low stock. */
+const LOW_STOCK_ABS = 5;
+/** Remaining / initial at or below this ratio also counts as low stock. */
+const LOW_STOCK_RATIO = 0.2;
+
+function marginHeatColor(marginPct: number): string {
+    // Map -20% .. 80% → hue 0 (red) .. 140 (green)
+    const t = Math.max(0, Math.min(1, (marginPct + 20) / 100));
+    const hue = t * 140;
+    return `hsl(${hue} 65% 42%)`;
+}
 
 function startOfWeekMonday(d: Date): Date {
     const x = new Date(d);
@@ -773,6 +785,131 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
         return result;
     }, [netPositionByParticipant, data.participants, t]);
 
+    // 13. Low stock alerts (aggregated by product)
+    const lowStockAlerts = useMemo(() => {
+        const productsMap = new Map((data.products || []).map(p => [p.id, p]));
+        const byProduct: Record<
+            string,
+            { productId: string; productName: string; remaining: number; initial: number; batchCount: number }
+        > = {};
+
+        data.items.forEach(item => {
+            const initial = item.initialQuantity || 0;
+            const remaining = item.quantity || 0;
+            if (initial <= 0 && remaining <= 0) return;
+            const productId = item.productId || 'unknown';
+            if (!byProduct[productId]) {
+                byProduct[productId] = {
+                    productId,
+                    productName: productsMap.get(productId)?.name || t('unknown'),
+                    remaining: 0,
+                    initial: 0,
+                    batchCount: 0
+                };
+            }
+            byProduct[productId].remaining += remaining;
+            byProduct[productId].initial += initial;
+            byProduct[productId].batchCount += 1;
+        });
+
+        return Object.values(byProduct)
+            .map(row => {
+                const pctRemaining = row.initial > 0 ? (row.remaining / row.initial) * 100 : 0;
+                const severity: 'critical' | 'low' =
+                    row.remaining <= 0 && row.initial > 0 ? 'critical' : 'low';
+                return { ...row, pctRemaining, severity };
+            })
+            .filter(row => {
+                if (row.severity === 'critical') return true;
+                const ratio = row.initial > 0 ? row.remaining / row.initial : 1;
+                return row.remaining > 0 && (row.remaining <= LOW_STOCK_ABS || ratio <= LOW_STOCK_RATIO);
+            })
+            .sort((a, b) => {
+                if (a.severity !== b.severity) return a.severity === 'critical' ? -1 : 1;
+                return a.pctRemaining - b.pctRemaining;
+            });
+    }, [data.items, data.products, t]);
+
+    // 14. Partner comparison bars (invested vs equal share per currency)
+    const partnerComparisonByCurrency = useMemo(() => {
+        const currencies = new Set<string>();
+        Object.values(spendingByParticipant).forEach(c => Object.keys(c).forEach(k => currencies.add(k)));
+        data.adjustments.forEach(a => currencies.add(a.currency));
+
+        const result: Record<
+            string,
+            { name: string; participantId: string; invested: number; equalShare: number; netPosition: number; difference: number }[]
+        > = {};
+
+        currencies.forEach(currency => {
+            if (selectedCurrency !== 'all' && currency !== selectedCurrency) return;
+
+            const participantIds = new Set<string>();
+            Object.entries(spendingByParticipant).forEach(([pid, totals]) => {
+                if (totals[currency]) participantIds.add(pid);
+            });
+            data.adjustments.forEach(adj => {
+                if (adj.currency === currency) {
+                    participantIds.add(adj.fromParticipantId);
+                    participantIds.add(adj.toParticipantId);
+                }
+            });
+
+            const ids = Array.from(participantIds).filter(
+                pid => selectedParticipant === 'all' || pid === selectedParticipant
+            );
+            if (ids.length === 0) return;
+
+            // Equal share is based on all partners in this currency (not the filtered subset)
+            const allIds = Array.from(participantIds);
+            let totalInvested = 0;
+            allIds.forEach(pid => {
+                totalInvested += spendingByParticipant[pid]?.[currency] || 0;
+            });
+            const equalShare = allIds.length > 0 ? totalInvested / allIds.length : 0;
+
+            const rows = (selectedParticipant === 'all' ? allIds : ids).map(pid => {
+                const invested = spendingByParticipant[pid]?.[currency] || 0;
+                const netPosition = netPositionByParticipant[pid]?.[currency] || invested;
+                return {
+                    name: data.participants.find(p => p.id === pid)?.name || t('unknown'),
+                    participantId: pid,
+                    invested,
+                    equalShare,
+                    netPosition,
+                    difference: netPosition - equalShare
+                };
+            });
+
+            if (rows.length > 0) result[currency] = rows;
+        });
+
+        return result;
+    }, [
+        spendingByParticipant,
+        netPositionByParticipant,
+        data.adjustments,
+        data.participants,
+        selectedCurrency,
+        selectedParticipant,
+        t
+    ]);
+
+    // 15. Margin heatmap cells (from sold product analysis)
+    const marginHeatmap = useMemo(() => {
+        return [...soldItemsAnalysis.items]
+            .sort((a, b) => b.profitMargin - a.profitMargin)
+            .map(item => ({
+                productId: item.productId,
+                name: item.itemName,
+                margin: item.profitMargin,
+                profit: item.profit,
+                revenue: item.totalRevenue,
+                qty: item.quantitySold,
+                color: marginHeatColor(item.profitMargin)
+            }));
+    }, [soldItemsAnalysis.items]);
+
     // Get participant name
     const getParticipantName = (id: string) => {
         return data.participants.find(p => p.id === id)?.name || t('unknown');
@@ -952,6 +1089,103 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                         />
                     </div>
                 </div>
+            </div>
+
+            {/* Low stock alerts */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
+                    <div className="flex items-start gap-2">
+                        <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+                        <div>
+                            <h3 className="text-lg font-semibold text-slate-800">{t('stats_low_stock_title')}</h3>
+                            <p className="text-sm text-slate-500 mt-0.5">{t('stats_low_stock_desc', { abs: LOW_STOCK_ABS, pct: Math.round(LOW_STOCK_RATIO * 100) })}</p>
+                        </div>
+                    </div>
+                    {lowStockAlerts.length > 0 && (
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 self-start">
+                            {t('stats_low_stock_count', { count: lowStockAlerts.length })}
+                        </span>
+                    )}
+                </div>
+                {lowStockAlerts.length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-6">{t('stats_low_stock_empty')}</p>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {lowStockAlerts.map(row => (
+                            <div
+                                key={row.productId}
+                                className={`p-4 rounded-xl border ${
+                                    row.severity === 'critical'
+                                        ? 'bg-red-50 border-red-200'
+                                        : 'bg-amber-50 border-amber-200'
+                                }`}
+                            >
+                                <div className="flex justify-between items-start gap-2">
+                                    <div className="min-w-0">
+                                        <p
+                                            className={`font-semibold truncate ${
+                                                row.severity === 'critical' ? 'text-red-950' : 'text-amber-950'
+                                            }`}
+                                        >
+                                            {row.productName}
+                                        </p>
+                                        <p
+                                            className={`text-xs mt-0.5 ${
+                                                row.severity === 'critical' ? 'text-red-800/80' : 'text-amber-800/80'
+                                            }`}
+                                        >
+                                            {t('stats_low_stock_batches', { count: row.batchCount })}
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${
+                                            row.severity === 'critical'
+                                                ? 'bg-red-200 text-red-900'
+                                                : 'bg-amber-200 text-amber-950'
+                                        }`}
+                                    >
+                                        {row.severity === 'critical'
+                                            ? t('stats_low_stock_critical')
+                                            : t('stats_low_stock_low')}
+                                    </span>
+                                </div>
+                                <div className="mt-3 flex items-end justify-between">
+                                    <div>
+                                        <p
+                                            className={`text-xl font-bold tabular-nums ${
+                                                row.severity === 'critical' ? 'text-red-950' : 'text-amber-950'
+                                            }`}
+                                        >
+                                            {row.remaining}
+                                        </p>
+                                        <p
+                                            className={`text-xs ${
+                                                row.severity === 'critical' ? 'text-red-800/80' : 'text-amber-800/80'
+                                            }`}
+                                        >
+                                            {t('remaining')} / {row.initial}
+                                        </p>
+                                    </div>
+                                    <p
+                                        className={`text-sm font-semibold tabular-nums ${
+                                            row.severity === 'critical' ? 'text-red-900' : 'text-amber-900'
+                                        }`}
+                                    >
+                                        {row.pctRemaining.toFixed(0)}%
+                                    </p>
+                                </div>
+                                <div className="mt-2 h-1.5 rounded-full bg-black/10 dark:bg-white/15 overflow-hidden">
+                                    <div
+                                        className={`h-full rounded-full ${
+                                            row.severity === 'critical' ? 'bg-red-500' : 'bg-amber-500'
+                                        }`}
+                                        style={{ width: `${Math.min(100, row.pctRemaining)}%` }}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Activity timeline: from first purchase */}
@@ -1400,8 +1634,105 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                             </div>
                         </div>
                     )}
+
+                    {/* Margin heatmap */}
+                    {marginHeatmap.length > 0 && (
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                            <div className="flex items-start gap-2 mb-2">
+                                <Grid3x3 size={18} className="text-indigo-600 mt-0.5 shrink-0" />
+                                <div>
+                                    <h4 className="font-semibold text-slate-800">{t('stats_margin_heatmap_title')}</h4>
+                                    <p className="text-sm text-slate-500 mt-0.5">{t('stats_margin_heatmap_desc')}</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-slate-500 mb-4">
+                                <span>{t('stats_margin_heatmap_scale_low')}</span>
+                                <div
+                                    className="h-2 flex-1 max-w-[160px] rounded-full"
+                                    style={{
+                                        background:
+                                            'linear-gradient(90deg, hsl(0 65% 42%), hsl(70 65% 42%), hsl(140 65% 42%))'
+                                    }}
+                                />
+                                <span>{t('stats_margin_heatmap_scale_high')}</span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                                {marginHeatmap.map(cell => (
+                                    <div
+                                        key={cell.productId}
+                                        className="rounded-lg p-3 text-white shadow-sm min-h-[88px] flex flex-col justify-between"
+                                        style={{ backgroundColor: cell.color }}
+                                        title={`${cell.name}: ${cell.margin.toFixed(1)}% · ${cell.profit.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${profitCurrency}`}
+                                    >
+                                        <p className="text-xs font-semibold leading-snug line-clamp-2 opacity-95">
+                                            {cell.name}
+                                        </p>
+                                        <div className="mt-2">
+                                            <p className="text-lg font-bold tabular-nums">{cell.margin.toFixed(0)}%</p>
+                                            <p className="text-[10px] opacity-85 tabular-nums">
+                                                {cell.qty} {t('units')} · {cell.profit.toLocaleString(undefined, { maximumFractionDigits: 0 })} {profitCurrency}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
+
+            {/* Partner comparison bars */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                <div className="flex items-start gap-2 mb-4">
+                    <Scale size={18} className="text-cyan-600 mt-0.5 shrink-0" />
+                    <div>
+                        <h3 className="text-lg font-semibold text-slate-800">{t('stats_partner_compare_title')}</h3>
+                        <p className="text-sm text-slate-500 mt-0.5">{t('stats_partner_compare_desc')}</p>
+                    </div>
+                </div>
+                {Object.keys(partnerComparisonByCurrency).length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-8">{t('stats_partner_compare_empty')}</p>
+                ) : (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                        {Object.entries(partnerComparisonByCurrency).map(([currency, rows]) => (
+                            <div key={currency} className="border border-slate-100 rounded-xl p-4 bg-slate-50/40">
+                                <h4 className="text-sm font-bold text-slate-700 mb-3">{currency}</h4>
+                                <div className="h-64">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                            <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={rows.length > 3 ? -20 : 0} textAnchor={rows.length > 3 ? 'end' : 'middle'} height={rows.length > 3 ? 50 : 30} />
+                                            <YAxis tick={{ fontSize: 11 }} />
+                                            <Tooltip
+                                                formatter={(value: number, name: string) => [
+                                                    `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${currency}`,
+                                                    name === 'invested'
+                                                        ? t('invested')
+                                                        : name === 'equalShare'
+                                                          ? t('equal_share')
+                                                          : t('net_position')
+                                                ]}
+                                            />
+                                            <Legend
+                                                formatter={(value: string) =>
+                                                    value === 'invested'
+                                                        ? t('invested')
+                                                        : value === 'equalShare'
+                                                          ? t('equal_share')
+                                                          : t('net_position')
+                                                }
+                                            />
+                                            <Bar dataKey="invested" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                            <Bar dataKey="equalShare" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                                            <Bar dataKey="netPosition" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
 
             {/* Spending by Participant Table */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
@@ -1452,7 +1783,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                                         {Object.entries(investedTotals)
                                                             .filter(([currency]) => selectedCurrency === 'all' || currency === selectedCurrency)
                                                             .map(([currency, amount]) => (
-                                                                <span key={currency} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                                <span key={currency} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-900 dark:text-blue-100">
                                                                     {amount.toLocaleString()} {currency}
                                                                 </span>
                                                             ))}
@@ -1471,7 +1802,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                                                 const net = paid - received;
                                                                 if (net === 0) return null;
                                                                 return (
-                                                                    <span key={currency} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${net > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                                                    <span key={currency} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${net > 0 ? 'bg-emerald-100 text-emerald-900 dark:text-emerald-100' : 'bg-red-100 text-red-900 dark:text-red-100'}`}>
                                                                         {net > 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
                                                                         {net > 0 ? '+' : ''}{net.toLocaleString()} {currency}
                                                                     </span>
@@ -1487,7 +1818,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ data }) => {
                                                         {Object.entries(netTotals)
                                                             .filter(([currency]) => selectedCurrency === 'all' || currency === selectedCurrency)
                                                             .map(([currency, amount]) => (
-                                                                <span key={currency} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${amount >= 0 ? 'bg-slate-100 text-slate-800' : 'bg-red-50 text-red-700'}`}>
+                                                                <span key={currency} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${amount >= 0 ? 'bg-slate-100 text-slate-900 dark:text-slate-100' : 'bg-red-50 text-red-900 dark:text-red-100'}`}>
                                                                     {amount.toLocaleString()} {currency}
                                                                 </span>
                                                             ))}

@@ -90,12 +90,39 @@ export type AddSelfTakeInput = {
   note?: string;
 };
 
+/**
+ * Cash withdrawal.
+ * - full: sales on or before `date` (per currency) are treated as withdrawn.
+ * - partial: only `amount` is withdrawn; remaining available cash stays.
+ * Legacy records without `mode`/`amount` are treated as full.
+ */
+export type MoneyRetirementMode = 'full' | 'partial';
+
+export interface MoneyRetirement {
+  id: string;
+  date: string;
+  currency: string;
+  mode?: MoneyRetirementMode;
+  /** Required for partial; ignored for full. */
+  amount?: number;
+  note?: string;
+}
+
+export type AddMoneyRetirementInput = {
+  date: string;
+  currency: string;
+  mode: MoneyRetirementMode;
+  amount?: number;
+  note?: string;
+};
+
 export interface StoreData {
   participants: Participant[];
   products: Product[];  // New: Product catalog
   items: Item[];
   sales: Sale[];
   selfTakes: SelfTake[];
+  moneyRetirements: MoneyRetirement[];
   rates: ConversionRates;
   adjustments: Adjustment[];
   language: 'en' | 'es';

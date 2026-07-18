@@ -43,20 +43,40 @@ Built with React, Vite, TypeScript, and Electron, it provides the smooth, respon
     npm install
     ```
 
-3.  **Environment Setup:**
-    Create a `.env` file in the root directory and add your Gemini API key for the AI Analyst feature (either name works):
+3.  **Environment Setup (AI Analyst):**
+    Create a `.env` file in the root directory. Choose a provider and set the key.
+
+    **Google Gemini** (default):
     ```env
-    VITE_GEMINI_API_KEY=your_api_key_here
+    AI_PROVIDER=gemini
+    AI_API_KEY=your_gemini_key
+    AI_MODEL=gemini-2.0-flash
     ```
-    Or:
+    Legacy names still work: `GEMINI_API_KEY` / `VITE_GEMINI_API_KEY`, `GEMINI_MODEL`.
+
+    **DeepSeek:**
     ```env
-    GEMINI_API_KEY=your_api_key_here
+    AI_PROVIDER=deepseek
+    AI_API_KEY=your_deepseek_key
+    AI_MODEL=deepseek-chat
     ```
-    Optional: override the model (default is `gemini-2.0-flash`):
+
+    **OpenAI:**
     ```env
-    GEMINI_MODEL=gemini-2.0-flash
+    AI_PROVIDER=openai
+    AI_API_KEY=your_openai_key
+    AI_MODEL=gpt-4o-mini
     ```
-    Restart `npm run dev` after changing `.env`.
+
+    **Custom OpenAI-compatible endpoint** (Ollama, LM Studio, vLLM, proxy, etc.):
+    ```env
+    AI_PROVIDER=custom
+    AI_API_KEY=your_key_or_placeholder
+    AI_BASE_URL=http://localhost:11434/v1
+    AI_MODEL=llama3.2
+    ```
+
+    Restart the app after changing `.env`.
 
 ### Running the Application
 

@@ -1,27 +1,70 @@
 import { GoogleGenAI } from "@google/genai";
-import { StoreData } from '../types';
+import { StoreData, Item, Sale, SelfTake, Adjustment } from '../types';
+import { getAiConfig, getAiProviderLabel, resolveChatCompletionsUrl, AiRuntimeConfig } from './aiConfig';
 
-function getApiKey(): string {
-  return (
-    (typeof process !== 'undefined' && process.env?.API_KEY) ||
-    (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) ||
-    ''
-  ).trim();
+export { getAiConfig, getAiProviderLabel };
+
+async function callGemini(prompt: string, config: AiRuntimeConfig): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: config.apiKey });
+  const response = await ai.models.generateContent({
+    model: config.model,
+    contents: prompt,
+  });
+  return response.text || 'No insights generated.';
 }
 
-function getModelId(): string {
-  const m =
-    (typeof process !== 'undefined' && process.env?.GEMINI_MODEL) || '';
-  return m.trim() || 'gemini-2.0-flash';
-}
+/** OpenAI-compatible Chat Completions (OpenAI, DeepSeek, local/custom endpoints). */
+async function callOpenAiCompatible(prompt: string, config: AiRuntimeConfig): Promise<string> {
+  const url = resolveChatCompletionsUrl(config);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert Business Intelligence analyst for a multi-partner retail / import business. Follow the user instructions carefully.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3,
+    }),
+  });
 
-const getClient = () => {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('MISSING_API_KEY');
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const errBody = await res.json();
+      detail =
+        errBody?.error?.message ||
+        errBody?.message ||
+        JSON.stringify(errBody);
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    throw new Error(`HTTP ${res.status} (${url}): ${detail || res.statusText}`);
   }
-  return new GoogleGenAI({ apiKey });
-};
+
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (typeof text === 'string' && text.trim()) return text;
+  return 'No insights generated.';
+}
+
+async function callLlm(prompt: string, config: AiRuntimeConfig): Promise<string> {
+  if (config.provider === 'gemini') {
+    return callGemini(prompt, config);
+  }
+  if (!config.baseUrl) {
+    throw new Error('MISSING_BASE_URL');
+  }
+  return callOpenAiCompatible(prompt, config);
+}
 
 function nameMap<T extends { id: string; name: string }>(rows: T[]): Record<string, string> {
   const m: Record<string, string> = {};
@@ -216,18 +259,25 @@ Instructions:
 `;
 
   try {
-    const ai = getClient();
-    const model = getModelId();
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-    });
-    return response.text || 'No insights generated.';
-  } catch (error: unknown) {
-    if (error instanceof Error && error.message === 'MISSING_API_KEY') {
-      return 'MISSING_API_KEY';
+    const config = getAiConfig();
+    if (!config.apiKey) {
+      throw new Error('MISSING_API_KEY');
     }
-    console.error('Gemini API Error:', error);
+    if (
+      (config.provider === 'openai' ||
+        config.provider === 'deepseek' ||
+        config.provider === 'custom') &&
+      !config.baseUrl
+    ) {
+      throw new Error('MISSING_BASE_URL');
+    }
+    return await callLlm(prompt, config);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      if (error.message === 'MISSING_API_KEY') return 'MISSING_API_KEY';
+      if (error.message === 'MISSING_BASE_URL') return 'MISSING_BASE_URL';
+    }
+    console.error('AI API Error:', error);
     const msg =
       error && typeof error === 'object' && 'message' in error
         ? String((error as { message: unknown }).message)
